@@ -1,0 +1,18 @@
+# sorties de build
+build/
+dist/
+*.spec.bak
+# version générée au build
+_version.py
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+# macOS
+.DS_Store
+# données de travail : jamais dans le dépôt
+*.obj
+*.mtl
+*.dae
+*.bpt

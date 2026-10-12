@@ -1,0 +1,3 @@
+numpy>=1.26
+Pillow>=10      # lecture des textures de l'OBJ (aperçu coloré) ; facultatif
+# tkinterdnd2   # facultatif : glisser-déposer d'un .obj dans la fenêtre
