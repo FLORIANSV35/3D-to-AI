@@ -57,6 +57,14 @@ pip install -r requirements-build.txt
 ./build_windows.sh             # -> dist/DRONE-TO-AI-V…-windows-x64.zip
 ```
 
+## Mises à jour
+L'app vérifie au démarrage (en arrière-plan, sans jamais bloquer l'interface) si une version plus récente est publiée dans les
+**Releases** du dépôt. Si oui, un bouton « Mise à jour V… » apparaît en haut à droite et ouvre le téléchargement adapté à ton système.
+Onglet MODÈLE → **Version** : « Rechercher une mise à jour » (à la demande) et case « Vérifier au démarrage » (désactivable ;
+préférence enregistrée dans le dossier de configuration de l'utilisateur).
+La vérification interroge uniquement l'API publique de GitHub (`api.github.com`), sans compte ni jeton, et n'envoie rien d'autre que la
+requête HTTPS. Lancée depuis le code source (version « dev »), elle ne s'exécute pas au démarrage ; `python3 app.py --check-update` la fait à la main.
+
 ## Numéro de version
 Format **`V AA.MM.XX`** : `AA` année (2 chiffres), `MM` mois, `XX` nombre de commits faits durant le mois (remis à zéro
 chaque début de mois). Exemple : `V26.10.02` = 2ᵉ commit d'octobre 2026. Calculé par `version.sh` à partir de
@@ -78,5 +86,6 @@ L'app écrit exactement cette structure (option « Un seul groupe de triangles �
 | `preview3d.py` | Vue 3D : rendu numpy, repère XYZ, polygone de recadrage |
 | `obj2dae.py` | Moteur : lecture OBJ / MTL, rotation, recadrage, réduction, écriture DAE |
 | `theme.py` | Thème visuel inspiré d'ArrayIntelligence |
+| `updater.py`, `settings.py` | Recherche de mise à jour (API GitHub) et préférences |
 | `build_app.sh`, `DRONE-TO-ADAMSON-AI.spec`, `assets/` | Construction de l'app macOS et icône |
 | `version.sh` | Calcul du numéro `V AA.MM.XX` |

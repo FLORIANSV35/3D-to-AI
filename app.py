@@ -5,13 +5,16 @@ Lancer :  python3 app.py
 import os
 import queue
 import threading
+import webbrowser
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 import numpy as np
 
 import obj2dae
+import settings
 import theme
+import updater
 from preview3d import Preview
 
 try:  # glisser-déposer si tkinterdnd2 est installé (pip install tkinterdnd2)
@@ -73,6 +76,8 @@ class App(_Root):
         self.createcommand("::tk::mac::OpenDocument", self._open_documents)
         self.select_tab("model")
         self.after(100, self.poll)
+        if self.auto_update.get() and VERSION != "dev":  # pas pour le code source (« dev »)
+            self.after(2500, lambda: self.check_update(manual=False))
 
     # --- variables --------------------------------------------------------------
     def _make_vars(self):
@@ -93,6 +98,8 @@ class App(_Root):
         self.normals = tk.BooleanVar(value=True)
         self.decim = tk.BooleanVar(value=False)
         self.target = tk.StringVar(value="200000")
+        self.auto_update = tk.BooleanVar(value=bool(settings.load().get("check_updates", True)))
+        self._update = None  # dernière réponse de la recherche de mise à jour
 
     # --- petits constructeurs de widgets ------------------------------------------
     def _spin(self, parent, var, width=8, lo=-100000, hi=100000, inc=1, cb=None):
@@ -126,6 +133,8 @@ class App(_Root):
         ttk.Label(top, text="DroneToAI", style="Logo.TLabel", width=13).pack(side="left", fill="y", padx=(0, 6))
         tabs = ttk.Frame(top, style="Window.TFrame")
         tabs.pack(side="left", fill="x", expand=True)
+        self._tabs_frame = tabs
+        self.upd_btn = ttk.Button(top, text="", style="Accent.TButton", command=self.open_update)  # affiché si nouveauté
         self.tab_btns = {}
         for i, (label, key) in enumerate(self.TABS):
             b = ttk.Button(tabs, text=label, style="Tab.TButton", command=lambda k=key: self.select_tab(k))
@@ -269,6 +278,15 @@ class App(_Root):
                         command=self._toggle_axes).pack(anchor="w", pady=2)
         self.lbl_tex = ttk.Label(p, text="", style="Muted.TLabel", wraplength=SIDE_W - 50)
         self.lbl_tex.pack(anchor="w", pady=(4, 0))
+        self._section(p, "Version")
+        ttk.Label(p, text=f"DRONE TO AI {VERSION}", foreground=theme.WHITE).pack(anchor="w")
+        self.lbl_update = ttk.Label(p, text="", style="Muted.TLabel", wraplength=SIDE_W - 50)
+        self.lbl_update.pack(anchor="w", pady=(2, 6))
+        ur = ttk.Frame(p)
+        ur.pack(fill="x")
+        ttk.Button(ur, text="Rechercher une mise à jour", command=lambda: self.check_update(manual=True)).pack(side="left")
+        ttk.Checkbutton(p, text="Vérifier au démarrage", variable=self.auto_update,
+                        command=self._save_prefs).pack(anchor="w", pady=(6, 0))
         self._hint(p, "Vue 3D : glisser = tourner · clic droit + glisser (ou Maj + glisser) = déplacer · molette = zoom "
                       "vers le curseur · double-clic = recentrer. "
                       "Le repère XYZ est l'origine d'AI (Z bleu = Top, Y vert = Cours, X rouge = Nez) : attrape son centre ou une flèche "
@@ -356,6 +374,55 @@ class App(_Root):
         ttk.Entry(r, textvariable=self.target, width=11).pack(side="left")
         self._hint(p, "AI lit un seul groupe de triangles et peut manquer de mémoire sur de très gros maillages : "
                       "réduis-les (200 000 est un bon départ).")
+
+    # --- mises à jour ----------------------------------------------------------
+    def _save_prefs(self):
+        settings.save({**settings.load(), "check_updates": bool(self.auto_update.get())})
+
+    def check_update(self, manual=False):
+        """Interroge GitHub en arrière-plan (l'interface ne se fige jamais)."""
+        if manual:
+            self.lbl_update.config(text="Recherche en cours…")
+
+        def work():
+            try:
+                self.q.put(("update", updater.fetch_latest(VERSION), manual))
+            except Exception as e:  # noqa: BLE001  (pas de réseau, GitHub injoignable, limite de requêtes…)
+                self.q.put(("update_err", str(e), manual))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_update_result(self, info, manual):
+        self._update = info
+        tag = info["tag"]
+        if info["newer"]:
+            self.lbl_update.config(text=f"Nouvelle version disponible : {tag} (publiée le {info['date']}).",
+                                   foreground=theme.BROWN)
+            self.upd_btn.config(text=f"Mise à jour {tag}")
+            self.upd_btn.pack(side="right", padx=(6, 0), before=self._tabs_frame)
+            if manual and messagebox.askyesno(
+                    "Mise à jour disponible",
+                    f"{tag} est disponible (version actuelle : {VERSION}).\n\n{info['notes'][:600]}\n\n"
+                    "Ouvrir la page de téléchargement ?"):
+                self.open_update()
+            return
+        self.upd_btn.pack_forget()
+        if VERSION == "dev":
+            self.lbl_update.config(text=f"Version de développement (code source). Dernière version publiée : {tag}.",
+                                   foreground=theme.MUTED)
+        else:
+            self.lbl_update.config(text=f"Vous avez la dernière version ({tag}).", foreground=theme.MUTED)
+        if manual:
+            messagebox.showinfo("Mise à jour", self.lbl_update.cget("text"))
+
+    def _on_update_error(self, err, manual):
+        if manual:  # au démarrage, un échec reste silencieux
+            self.lbl_update.config(text="Impossible de joindre GitHub (pas de connexion ?).", foreground=theme.ERROR)
+            messagebox.showwarning("Mise à jour", f"Impossible de vérifier la dernière version.\n\n{err}")
+
+    def open_update(self):
+        if self._update:
+            webbrowser.open(self._update["download"] if self._update["newer"] else self._update["page"])
 
     def _open_documents(self, *paths):
         for p in paths:
@@ -730,6 +797,10 @@ class App(_Root):
                         "Conversion terminée",
                         f"{msg[1]}\n\nTriangles : {st['tris_in']:,} → {st['tris_out']:,}\n"
                         "Dimensions : %.1f × %.1f × %.1f m" % tuple(st["size_m"]))
+                elif kind == "update":
+                    self._on_update_result(msg[1], msg[2])
+                elif kind == "update_err":
+                    self._on_update_error(msg[1], msg[2])
                 elif kind == "error":
                     self.btn.config(state="normal" if self.mesh else "disabled")
                     self.lbl_status.config(text="Erreur")
@@ -770,6 +841,8 @@ def selftest():
         assert len(groups) == 1, "AI exige un seul groupe de triangles"
         assert len(groups[0].findall("c:input", ns)) == 1, "AI exige une seule entrée par sommet"
         assert 0 < st["tris_cropped"] < st["tris_in"], "le recadrage par polygone n'a rien filtré"
+    assert updater.is_newer("V26.10.04", "V26.10.03") and updater.is_newer("V26.11.01", "V26.10.12")
+    assert not updater.is_newer("V26.10.03", "V26.10.03") and not updater.is_newer("V26.10.02", "dev")
     print("OK :", VERSION, "- moteur OBJ->DAE fonctionnel,", st["tris_in"], "->", st["tris_cropped"], "triangles")
     return 0
 
@@ -810,6 +883,14 @@ def smoketest(shot=None):
         if shot:
             from PIL import ImageGrab
             ImageGrab.grab().save(shot)
+        # interface de mise à jour (réponse simulée : aucun accès réseau)
+        fake = {"tag": "V99.01.01", "name": "x", "date": "2099-01-01", "notes": "", "page": "p", "download": "d", "newer": True}
+        app._on_update_result(fake, False)
+        app.update()
+        assert app.upd_btn.winfo_ismapped(), "le bouton de mise à jour n'apparaît pas"
+        app._on_update_result({**fake, "tag": "V00.01.01", "newer": False}, False)
+        app.update()
+        assert not app.upd_btn.winfo_ismapped(), "le bouton de mise à jour ne disparaît pas"
         app.destroy()
     print("OK :", VERSION, "- interface fonctionnelle (chargement, onglets, vues, rendu, export)")
     return 0
@@ -825,6 +906,15 @@ def main(argv):
             pass
     if "--selftest" in argv:
         return selftest()
+    if "--check-update" in argv:  # python3 app.py --check-update (sans fenêtre)
+        try:
+            info = updater.fetch_latest(VERSION)
+        except Exception as e:  # noqa: BLE001
+            print("Impossible de vérifier :", e)
+            return 2
+        print(f"Version actuelle : {VERSION} | dernière version publiée : {info['tag']} | "
+              + ("mise à jour disponible : " + info["download"] if info["newer"] else "à jour"))
+        return 0
     if "--smoketest" in argv:
         shot = argv[argv.index("--screenshot") + 1] if "--screenshot" in argv else None
         return smoketest(shot)

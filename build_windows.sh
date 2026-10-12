@@ -22,6 +22,10 @@ echo "→ PyInstaller"
 echo "→ autotest de l'exécutable construit"
 "dist/DRONE TO AI/DRONE TO AI.exe" --selftest
 
+# la recherche de mise à jour doit fonctionner depuis l'exécutable (certificats SSL embarqués) ; non bloquant : dépend du réseau
+"dist/DRONE TO AI/DRONE TO AI.exe" --check-update && echo "✔ recherche de mise à jour : OK depuis l'exécutable" \
+  || echo "⚠ recherche de mise à jour : code de sortie $? (réseau ou certificats ?)"
+
 ZIP="DRONE-TO-AI-V${APP_VERSION}-windows-x64"
 "$PY" -c "import shutil; shutil.make_archive('dist/$ZIP', 'zip', 'dist', 'DRONE TO AI')"
 echo "✔ dist/$ZIP.zip"
