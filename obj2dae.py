@@ -198,11 +198,11 @@ def rotation_matrix(rx, ry, rz):
 
 
 def rotate(v, rot):
-    """Applique rot=(rx, ry, rz) autour du centre de la boîte englobante."""
+    """Applique rot=(rx, ry, rz) autour de l'ORIGINE du repère (le repère XYZ d'AI) : le modèle tourne comme un
+    solide autour de cet axe. (Pour pivoter autour d'un point du modèle, placer d'abord l'origine sur ce point.)"""
     if not rot or not any(rot):
         return v
-    c = (v.min(axis=0) + v.max(axis=0)) / 2
-    return (v - c) @ rotation_matrix(*rot).T + c
+    return v @ rotation_matrix(*rot).T
 
 
 def auto_level(zup, sample=200_000):

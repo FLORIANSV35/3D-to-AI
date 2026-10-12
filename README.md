@@ -9,9 +9,10 @@ orienter, placer et recadrer le modèle avant l'export.
 ## Fonctions
 - **Aperçu 3D fluide** du maillage (surface échantillonnée, textures / couleurs du `.mtl` si présentes).
   Glisser = tourner · clic droit + glisser (ou Maj + glisser) = déplacer · molette = zoom vers le curseur.
-- **Placement** : rotation par pas de 90° autour des axes, réglage fin en degrés, mise à niveau automatique du sol,
+- **Placement** : rotation par pas de 90° **autour du repère XYZ** (le modèle tourne comme un solide autour de l'origine d'AI ;
+  pour pivoter autour d'un point, on y pose d'abord l'origine), réglage fin en degrés, mise à niveau automatique du sol,
   position X / Y / Z en mètres, centrage, sol à Z = 0.
-- **Repère XYZ = origine d'AI** dessiné dans l'aperçu : on l'attrape à la souris (ou « origine = point cliqué ») pour
+- **Repère XYZ = origine d'AI** dessiné dans l'aperçu, avec ses légendes (Z bleu = *Top*, Y vert = *Cours*, X rouge = *Nez*, modifiables dans `theme.py`) : on l'attrape à la souris (ou « origine = point cliqué ») pour
   poser l'origine d'AI exactement où l'on veut sur le modèle.
 - **Recadrage** : boîte min / max, ou **polygone tracé en vue de dessus** ; la partie exclue est grisée.
 - **Export DAE compatible AI** (voir ci-dessous), unités et axe vertical convertis, réduction optionnelle du nombre de triangles.

@@ -21,6 +21,33 @@ def _pk(rgb):
     return np.uint32(r | (g << 8) | (b << 16) | (255 << 24))
 
 
+_SPRITES = {}
+
+
+def _sprite(text, rgb, size):
+    """Petit sprite de texte (contour sombre pour rester lisible sur n'importe quel fond) :
+    (rgb float32 (h,w,3), alpha float32 (h,w,1)), ou None si Pillow est absent."""
+    key = (text, rgb, size)
+    if key not in _SPRITES:
+        try:
+            from PIL import Image, ImageDraw, ImageFont
+            try:
+                font = ImageFont.load_default(size)  # Pillow >= 10.1 : police vectorielle à la taille voulue
+            except TypeError:
+                font = ImageFont.load_default()
+            pad = 3
+            probe = ImageDraw.Draw(Image.new("RGBA", (4, 4)))
+            x0, y0, x1, y1 = probe.textbbox((0, 0), text, font=font, stroke_width=1)
+            im = Image.new("RGBA", (x1 - x0 + 2 * pad, y1 - y0 + 2 * pad), (0, 0, 0, 0))
+            ImageDraw.Draw(im).text((pad - x0, pad - y0), text, font=font, fill=tuple(rgb) + (255,),
+                                    stroke_width=1, stroke_fill=(18, 20, 18, 255))
+            arr = np.asarray(im, dtype=np.float32)
+            _SPRITES[key] = (arr[:, :, :3], arr[:, :, 3:] / 255.0)
+        except Exception:  # noqa: BLE001  (Pillow absent ou police indisponible : pas de légende)
+            _SPRITES[key] = None
+    return _SPRITES[key]
+
+
 class Preview(tk.Label):
     def __init__(self, master, on_moved=None):
         super().__init__(master, bg=theme.VIEWPORT, cursor="fleur", bd=0, highlightthickness=0)
@@ -216,13 +243,36 @@ class Preview(tk.Label):
         # repère de sortie (0,0,0) : X rouge, Y vert, Z bleu, caché là où le modèle passe devant
         if self.show_axes and self.origin is not None:
             ramp = np.linspace(0, self.GIZMO_LEN, 80)[:, None]
-            for d, colr in (((1, 0, 0), theme.AXIS_X), ((0, 0, -1), theme.AXIS_Y), ((0, 1, 0), theme.AXIS_Z)):
+            rgba = img.view(np.uint8).reshape(h, w, 4)  # même mémoire que img, pour mélanger les légendes
+            for name, d, colr in (("X", (1, 0, 0), theme.AXIS_X), ("Y", (0, 0, -1), theme.AXIS_Y),
+                                  ("Z", (0, 1, 0), theme.AXIS_Z)):
                 gx, gy, gd = self._project(self.origin + ramp * np.array(d, dtype=float), w, h)
                 gx, gy = gx.astype(int), gy.astype(int)
                 ok = (gx >= r + 2) & (gx < w - r - 2) & (gy >= r + 2) & (gy < h - r - 2)
+                tip_ok = bool(ok[-1])
+                tx, ty = int(gx[-1]), int(gy[-1])
+                ox, oy = int(gx[0]), int(gy[0])
                 gx, gy, gd = gx[ok], gy[ok], gd[ok]
                 vis = gd >= self._local_max(zb, w, gx, gy, r) - 0.02  # tolérance : un axe posé sur le sol reste visible
                 paint(gx[vis], gy[vis], colr, thick)
+                # légende au bout de l'axe, décalée dans le prolongement de l'axe ; cachée si le bout l'est
+                label = theme.AXIS_LABELS.get(name)
+                if label and tip_ok and vis.size and vis[-1]:
+                    spr = _sprite(label, colr, 13 if f == 1 else 8)
+                    if spr is not None:
+                        rgb, alpha = spr
+                        sh, sw = alpha.shape[:2]
+                        v = np.array([tx - ox, ty - oy], dtype=float)
+                        v = v / max(np.hypot(*v), 1e-6)
+                        gap = 0.5 * sw * abs(v[0]) + 0.5 * sh * abs(v[1]) + 4
+                        x0, y0 = int(tx + v[0] * gap - sw / 2), int(ty + v[1] * gap - sh / 2)
+                        cx0, cy0, cx1, cy1 = max(x0, 0), max(y0, 0), min(x0 + sw, w), min(y0 + sh, h)
+                        if cx1 > cx0 and cy1 > cy0:
+                            sx0, sy0 = cx0 - x0, cy0 - y0
+                            a_ = alpha[sy0:sy0 + cy1 - cy0, sx0:sx0 + cx1 - cx0]
+                            c_ = rgb[sy0:sy0 + cy1 - cy0, sx0:sx0 + cx1 - cx0]
+                            reg = rgba[cy0:cy1, cx0:cx1, :3]
+                            reg[:] = (reg * (1 - a_) + c_ * a_).astype(np.uint8)
 
         vw = lambda x, y, z: np.array([x - self.c[0], z - self.c[2], -(y - self.c[1])]) / self.unit_m
         if self.poly_mode and self.draft:  # tracé en cours

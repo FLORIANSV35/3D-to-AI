@@ -60,6 +60,7 @@ class App(_Root):
         self.poly = None  # polygone de recadrage, points (h1, h2) sur les axes horizontaux de sortie
         self.q = queue.Queue()
         self._pending = None
+        self._rot_prev = (0.0, 0.0, 0.0)  # rotation précédente : sert à déduire la rotation ajoutée
         self._make_vars()
         self._build_ui()
         if DND_FILES:
@@ -94,9 +95,10 @@ class App(_Root):
         self.target = tk.StringVar(value="200000")
 
     # --- petits constructeurs de widgets ------------------------------------------
-    def _spin(self, parent, var, width=8, lo=-100000, hi=100000, inc=1):
-        e = ttk.Spinbox(parent, textvariable=var, from_=lo, to=hi, increment=inc, width=width, command=self.schedule)
-        e.bind("<KeyRelease>", lambda ev: self.schedule())
+    def _spin(self, parent, var, width=8, lo=-100000, hi=100000, inc=1, cb=None):
+        cb = cb or self.schedule
+        e = ttk.Spinbox(parent, textvariable=var, from_=lo, to=hi, increment=inc, width=width, command=cb)
+        e.bind("<KeyRelease>", lambda ev: cb())
         return e
 
     def _combo(self, parent, var, values, width=14):
@@ -269,10 +271,10 @@ class App(_Root):
         self.lbl_tex.pack(anchor="w", pady=(4, 0))
         self._hint(p, "Vue 3D : glisser = tourner · clic droit + glisser (ou Maj + glisser) = déplacer · molette = zoom "
                       "vers le curseur · double-clic = recentrer. "
-                      "Le repère XYZ rouge / vert / bleu est l'origine d'AI : attrape son centre ou une flèche "
+                      "Le repère XYZ est l'origine d'AI (Z bleu = Top, Y vert = Cours, X rouge = Nez) : attrape son centre ou une flèche "
                       "et glisse pour déplacer le modèle.")
 
-    def _xyz_row(self, p, vars_, width=9, header=True):
+    def _xyz_row(self, p, vars_, width=9, header=True, cb=None):
         """Ligne de trois champs X / Y / Z avec en-têtes gris façon tableau d'AI."""
         g = ttk.Frame(p)
         g.pack(fill="x")
@@ -280,12 +282,12 @@ class App(_Root):
             g.columnconfigure(c, weight=1, uniform="xyz")
             if header:
                 ttk.Label(g, text=name, style="Header.TLabel").grid(row=0, column=c, sticky="ew", padx=(0 if c == 0 else 2, 0))
-            e = self._spin(g, vars_[c], width)
+            e = self._spin(g, vars_[c], width, cb=cb)
             e.grid(row=1, column=c, sticky="ew", padx=(0 if c == 0 else 2, 0), pady=(2, 0))
         return g
 
     def _page_place(self, p):
-        self._section(p, "Rotation par pas de 90°", first=True)
+        self._section(p, "Rotation par pas de 90° (autour du repère XYZ)", first=True)
         g = ttk.Frame(p)
         g.pack(fill="x")
         g.columnconfigure((1, 2), weight=1, uniform="b")
@@ -295,7 +297,7 @@ class App(_Root):
             ttk.Button(g, text="+90°", command=lambda i=i: self.rot90(i, 90)).grid(row=i, column=2, sticky="ew", padx=(2, 0), pady=1)
 
         self._section(p, "Réglage fin (degrés)")
-        self._xyz_row(p, self.rot)
+        self._xyz_row(p, self.rot, cb=self.on_rot_change)
         b = ttk.Frame(p)
         b.pack(fill="x", pady=(8, 0))
         for c, (text, cmd) in enumerate((("Sol à niveau", self.do_level), ("Aligner sur X", self.do_yaw),
@@ -407,10 +409,70 @@ class App(_Root):
     def get_scale(self):
         return obj2dae.UNITS_TO_METERS[self.unit.get()] * float(self.scale.get().replace(",", "."))
 
+    @staticmethod
+    def _fmt(x, nd=2):
+        s = f"{x:.{nd}f}".rstrip("0").rstrip(".")
+        return s if s not in ("", "-0") else "0"
+
     def set_rot(self, rx, ry, rz):
         for v, x in zip(self.rot, (rx, ry, rz)):
-            v.set(f"{x:.2f}".rstrip("0").rstrip(".") if abs(x) > 1e-9 else "0")
+            v.set(self._fmt(x))
+        self.on_rot_change()
+
+    def _rot_values(self):
+        """Angles des champs de rotation, ou None si un champ est vide / incomplet (frappe en cours)."""
+        try:
+            return tuple(float(v.get().replace(",", ".")) for v in self.rot)
+        except ValueError:
+            return None
+
+    def on_rot_change(self):
+        """La rotation se fait autour du repère XYZ (origine d'AI) : le modèle tourne comme un solide autour de
+        cette origine. On applique donc la rotation ajoutée aussi à la position (offset), et à la zone de recadrage
+        quand c'est possible, pour que le point posé sur l'origine y reste."""
+        new = self._rot_values()
+        if new is None:
+            return
+        D = obj2dae.rotation_matrix(*new) @ obj2dae.rotation_matrix(*self._rot_prev).T  # rotation ajoutée (Z vertical)
+        self._rot_prev = new
+        if not np.allclose(D, np.eye(3), atol=1e-12):
+            P = np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]], float) if self.dst_up.get() == "Y" else np.eye(3)
+            Do = P @ D @ P.T  # même rotation dans le repère de sortie
+            for var, x in zip(self.off, Do @ np.asarray(self.get_off())):
+                var.set(self._fmt(x, 3))
+            self._follow_rotation(Do)
         self.schedule()
+
+    def _fit_crop_to_poly(self):
+        """La boîte de recadrage prend l'emprise horizontale du polygone."""
+        for k, ax_i in enumerate(self._hor()):
+            vals = [p[k] for p in self.poly]
+            ax = "XYZ"[ax_i]
+            self.crop[(ax, "min")].set(f"{np.floor(min(vals) * 100) / 100:g}")
+            self.crop[(ax, "max")].set(f"{np.ceil(max(vals) * 100) / 100:g}")
+
+    def _follow_rotation(self, Do):
+        """La zone de recadrage suit le modèle pour une rotation autour de la verticale (angle quelconque pour un
+        polygone, multiple de 90° pour la boîte). Pour une autre rotation, elle reste en place."""
+        up = 2 if self.dst_up.get() == "Z" else 1
+        if abs(Do[up, up] - 1) > 1e-9:
+            return
+        hor = self._hor()
+        M = Do[np.ix_(hor, hor)]
+        if self.poly:
+            self.poly = [tuple(M @ np.asarray(p, dtype=float)) for p in self.poly]
+            self._fit_crop_to_poly()
+        elif self.crop_on.get() and self.get_crop() is not None:
+            quarter = np.degrees(np.arctan2(M[1, 0], M[0, 0])) / 90
+            if abs(quarter - round(quarter)) > 1e-6:
+                return
+            axes = ["XYZ"[i] for i in hor]
+            lo = np.array([float(self.crop[(ax, "min")].get().replace(",", ".")) for ax in axes])
+            hi = np.array([float(self.crop[(ax, "max")].get().replace(",", ".")) for ax in axes])
+            corners = np.array([lo, hi, [lo[0], hi[1]], [hi[0], lo[1]]]) @ M.T
+            for k, ax in enumerate(axes):
+                self.crop[(ax, "min")].set(self._fmt(corners[:, k].min()))
+                self.crop[(ax, "max")].set(self._fmt(corners[:, k].max()))
 
     def rot90(self, axis, deg):
         self.set_rot(*obj2dae.rotate_world(self.get_rot(), axis, deg))
@@ -435,7 +497,7 @@ class App(_Root):
         if self.dst_up.get() == "Y":  # repère Z vertical de l'aperçu -> repère de sortie
             mv = np.array([mv[0], mv[2], -mv[1]])
         for var, x in zip(self.off, np.asarray(self.get_off()) + mv):
-            var.set(f"{x:.2f}".rstrip("0").rstrip(".") if abs(x) > 1e-9 else "0")
+            var.set(self._fmt(x, 3))
         if self.poly:
             i1, i2 = self._hor()
             self.poly = [(p[0] + mv[i1], p[1] + mv[i2]) for p in self.poly]
@@ -513,12 +575,7 @@ class App(_Root):
     def _on_poly_done(self, pts):
         """pts : points (X, Y) en repère Z vertical -> repère de sortie ; la boîte prend l'emprise du polygone."""
         self.poly = [(x, y) if self.dst_up.get() == "Z" else (x, -y) for x, y in pts]
-        i1, i2 = self._hor()
-        h1, h2 = [p[0] for p in self.poly], [p[1] for p in self.poly]
-        for ax_i, vals in ((i1, h1), (i2, h2)):
-            ax = "XYZ"[ax_i]
-            self.crop[(ax, "min")].set(f"{np.floor(min(vals) * 100) / 100:g}")
-            self.crop[(ax, "max")].set(f"{np.ceil(max(vals) * 100) / 100:g}")
+        self._fit_crop_to_poly()
         self.crop_on.set(True)
         self.lbl_pick.config(text=f"Polygone de {len(self.poly)} points enregistré.")
         self.schedule()

@@ -29,6 +29,7 @@ VIEWPORT_RGB = (0x37, 0x39, 0x36)
 AXIS_X = (255, 70, 70)
 AXIS_Y = (80, 220, 80)
 AXIS_Z = (90, 140, 255)
+AXIS_LABELS = {"X": "Nez", "Y": "Cours", "Z": "Top"}  # légendes affichées au bout des axes du repère
 HEIGHT_RAMP = ((92, 120, 112), (150, 172, 138), (226, 208, 164))  # bas -> haut du modèle sans texture
 CROP = (255, 170, 40)
 CROP_DIM = (150, 105, 30)
