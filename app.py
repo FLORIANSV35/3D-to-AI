@@ -683,22 +683,27 @@ class App(_Root):
         self.after(100, self.poll)
 
 
+def _sample_obj(folder, n=30):
+    """OBJ synthétique (nappe ondulée) pour les autotests."""
+    path = os.path.join(folder, "t.obj")
+    with open(path, "w") as f:
+        for i in range(n):
+            for j in range(n):
+                f.write(f"v {i} {j} {np.sin(i / 5) * 2:.3f}\n")
+        for i in range(n - 1):
+            for j in range(n - 1):
+                a = i * n + j + 1
+                f.write(f"f {a} {a + 1} {a + n + 1}\nf {a} {a + n + 1} {a + n}\n")
+    return path
+
+
 def selftest():
     """Vérifie, sans fenêtre, le moteur de conversion (utile pour valider un build)."""
     import tempfile
     import xml.etree.ElementTree as ET
 
     with tempfile.TemporaryDirectory() as d:
-        obj = os.path.join(d, "t.obj")
-        n = 30
-        with open(obj, "w") as f:
-            for i in range(n):
-                for j in range(n):
-                    f.write(f"v {i} {j} {np.sin(i / 5) * 2:.3f}\n")
-            for i in range(n - 1):
-                for j in range(n - 1):
-                    a = i * n + j + 1
-                    f.write(f"f {a} {a + 1} {a + n + 1}\nf {a} {a + n + 1} {a + n}\n")
+        obj = _sample_obj(d)
         dae = os.path.join(d, "t.dae")
         st = obj2dae.convert(obj, dae, 1.0, "Z", "Z", True, None, True, (0, 0, 90), True, (1, 2, 3), True,
                              crop=((-100, -100, -100), (100, 100, 100), [(-10, -10), (10, -10), (10, 10), (-10, 10)]))
@@ -708,13 +713,64 @@ def selftest():
         assert len(groups) == 1, "AI exige un seul groupe de triangles"
         assert len(groups[0].findall("c:input", ns)) == 1, "AI exige une seule entrée par sommet"
         assert 0 < st["tris_cropped"] < st["tris_in"], "le recadrage par polygone n'a rien filtré"
-    print("OK :", VERSION, "· moteur OBJ→DAE fonctionnel,", st["tris_in"], "→", st["tris_cropped"], "triangles")
+    print("OK :", VERSION, "- moteur OBJ->DAE fonctionnel,", st["tris_in"], "->", st["tris_cropped"], "triangles")
+    return 0
+
+
+def smoketest(shot=None):
+    """Ouvre vraiment l'interface : charge un modèle, parcourt les onglets et les vues, rend l'aperçu,
+    exporte un DAE. `shot` : chemin d'une capture d'écran PNG (nécessite Pillow et un écran)."""
+    import tempfile
+    import time
+
+    with tempfile.TemporaryDirectory() as d:
+        app = App()
+        app.geometry("1200x800+30+30")
+        app.update()
+        app.load(_sample_obj(d))
+        t0 = time.time()
+        while app.mesh is None and time.time() - t0 < 30:
+            app.update()
+            time.sleep(0.05)
+        assert app.mesh is not None, "le chargement de l'OBJ a échoué"
+        for key in ("place", "crop", "export", "model"):
+            app.select_tab(key)
+            app.update()
+        app.rot90(2, 90)
+        for view in ("top", "front", "side", "iso"):
+            app.preview.set_view(view)
+            app.update()
+        app.preview._interactive = False
+        app.preview.render()
+        for _ in range(10):
+            app.update()
+            time.sleep(0.05)
+        out = os.path.join(d, "t.dae")
+        app.update_idletasks()
+        st = obj2dae.convert(app.src, out, app.get_scale(), app.src_up.get(), app.dst_up.get(), False, None, True,
+                             app.get_rot(), False, app.get_off(), True)
+        assert os.path.getsize(out) > 0 and st["tris_out"] > 0
+        if shot:
+            from PIL import ImageGrab
+            ImageGrab.grab().save(shot)
+        app.destroy()
+    print("OK :", VERSION, "- interface fonctionnelle (chargement, onglets, vues, rendu, export)")
     return 0
 
 
 def main(argv):
+    import sys
+
+    for stream in (sys.stdout, sys.stderr):  # console Windows (cp1252) : ne jamais planter sur un caractère exotique
+        try:
+            stream.reconfigure(errors="replace")
+        except Exception:  # noqa: BLE001  (application sans console : flux absent)
+            pass
     if "--selftest" in argv:
         return selftest()
+    if "--smoketest" in argv:
+        shot = argv[argv.index("--screenshot") + 1] if "--screenshot" in argv else None
+        return smoketest(shot)
     app = App()
     paths = [p for p in argv if p.lower().endswith(".obj") and os.path.isfile(p)]
     if paths:  # python3 app.py modele.obj

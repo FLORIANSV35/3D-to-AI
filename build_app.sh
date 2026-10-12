@@ -20,7 +20,7 @@ python3 app.py --selftest
 [ -f assets/icon.icns ] || python3 assets/make_icon.py
 
 echo "→ PyInstaller"
-python3 -m PyInstaller --noconfirm --clean AI-ROOM-OBJ.spec
+python3 -m PyInstaller --noconfirm --clean DRONE-TO-ADAMSON-AI.spec
 
 APP="dist/DRONE TO AI.app"
 echo "→ autotest de l'app construite"

@@ -1,0 +1,53 @@
+name: Build Windows
+
+# Construit « DRONE-TO-AI-V…-windows-x64.zip » sur un serveur Windows et le joint à la release.
+#  - automatiquement quand une release est publiée ;
+#  - à la demande (Actions → Build Windows → Run workflow), avec le tag d'une release existante pour y joindre le zip.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag de la release à compléter (ex. V26.10.02) ; vide = simple artefact de test"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # version.sh compte les commits du mois
+          ref: ${{ env.TAG || github.ref }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Dépendances
+        run: python -m pip install -r requirements-build.txt
+
+      - name: Build + autotests
+        shell: bash
+        run: ./build_windows.sh
+
+      - name: Archiver (zip + capture d'écran de l'interface)
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: |
+            dist/*.zip
+            dist/screenshot-windows.png
+
+      - name: Joindre le zip à la release
+        if: ${{ env.TAG != '' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" dist/*.zip --clobber --repo "$GITHUB_REPOSITORY"

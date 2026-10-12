@@ -1,5 +1,6 @@
 """Thème visuel : fond olive très sombre, grands onglets rectangulaires (actif en blanc), accent brun,
 en-têtes de tableau gris. Palette propre à ce projet, dans l'esprit de l'interface d'ArrayIntelligence."""
+import sys
 import tkinter.font as tkfont
 from tkinter import ttk
 
@@ -43,6 +44,8 @@ def family(root):
 
 def apply(root):
     """Applique le thème à toute l'application (ttk 'clam', seul thème qui accepte les couleurs partout)."""
+    if sys.platform == "win32":  # Tk compte 1 pt = 1,33 px sous Windows : on aligne sur macOS (1 pt = 1 px)
+        root.tk.call("tk", "scaling", 1.0)
     fam = family(root)
     base = (fam, 12)
     root.configure(bg=BG)

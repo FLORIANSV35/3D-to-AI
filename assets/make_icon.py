@@ -1,4 +1,4 @@
-"""Génère assets/icon.png et assets/icon.icns (cube filaire sur fond olive, dans les couleurs de l'app).
+"""Génère assets/icon.png, assets/icon.ico (Windows) et assets/icon.icns (macOS) (cube filaire sur fond olive, dans les couleurs de l'app).
 
 Usage : python3 assets/make_icon.py        (macOS : utilise sips + iconutil pour le .icns)
 """
@@ -53,6 +53,8 @@ def main():
     img = draw()
     png = os.path.join(HERE, "icon.png")
     img.save(png)
+    img.save(os.path.join(HERE, "icon.ico"), sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
+    print("icon.png et icon.ico générés")
     with tempfile.TemporaryDirectory() as tmp:
         iconset = os.path.join(tmp, "icon.iconset")
         os.mkdir(iconset)

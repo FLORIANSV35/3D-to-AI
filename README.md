@@ -1,4 +1,4 @@
-# AI-ROOM-OBJ — DRONE TO AI
+# DRONE-TO-ADAMSON-AI — DRONE TO AI
 
 Convertit un scan de salle / de site (**OBJ**, par exemple issu d'une photogrammétrie par drone) en **DAE (Collada)**
 directement importable dans l'importeur « SketchUp » d'**Adamson ArrayIntelligence** (AI), avec un aperçu 3D pour
@@ -28,18 +28,33 @@ python3 obj2dae.py modele.obj sortie.dae --polygon -40 -40  40 -40  40 0  0 0  0
 python3 app.py --selftest      # vérifie le moteur de conversion, sans fenêtre
 ```
 
-## Télécharger l'app (macOS)
+## Télécharger l'app
+### macOS
 Dans l'onglet **Releases** : `DRONE-TO-AI-V…-macOS-arm64.zip` (Mac Apple Silicon, macOS 11+). Décompresser, puis au premier
 lancement faire **clic droit → Ouvrir** : l'app n'est pas notarisée par Apple. Si macOS la bloque quand même :
 `xattr -dr com.apple.quarantine "DRONE TO AI.app"`.
 
-## Construire l'app soi-même (macOS)
+### Windows
+Dans **Releases** : `DRONE-TO-AI-V…-windows-x64.zip`. Décompresser le dossier, puis lancer `DRONE TO AI.exe`. L'exécutable n'est pas signé :
+Windows SmartScreen peut afficher « Windows a protégé votre ordinateur » → **Informations complémentaires → Exécuter quand même**.
+Glisser un `.obj` sur l'exécutable le charge directement.
+La version Windows est construite automatiquement par GitHub Actions (`.github/workflows/windows.yml`) à chaque release ;
+le build lance un test de l'interface sur un vrai serveur Windows et conserve une capture d'écran en artefact.
+
+## Construire l'app soi-même
+**macOS**
 ```bash
 pip3 install -r requirements-build.txt
 ./build_app.sh                 # -> dist/DRONE TO AI.app
 ```
 Le script lance l'autotest, construit l'app avec PyInstaller, relance l'autotest **depuis l'app construite** et la signe
 « ad hoc ». Glisser un `.obj` sur l'icône (ou *Ouvrir avec…*) le charge directement.
+
+**Windows** (depuis Git Bash, avec Python de python.org)
+```bash
+pip install -r requirements-build.txt
+./build_windows.sh             # -> dist/DRONE-TO-AI-V…-windows-x64.zip
+```
 
 ## Numéro de version
 Format **`V AA.MM.XX`** : `AA` année (2 chiffres), `MM` mois, `XX` nombre de commits faits durant le mois (remis à zéro
@@ -62,5 +77,5 @@ L'app écrit exactement cette structure (option « Un seul groupe de triangles �
 | `preview3d.py` | Vue 3D : rendu numpy, repère XYZ, polygone de recadrage |
 | `obj2dae.py` | Moteur : lecture OBJ / MTL, rotation, recadrage, réduction, écriture DAE |
 | `theme.py` | Thème visuel inspiré d'ArrayIntelligence |
-| `build_app.sh`, `AI-ROOM-OBJ.spec`, `assets/` | Construction de l'app macOS et icône |
+| `build_app.sh`, `DRONE-TO-ADAMSON-AI.spec`, `assets/` | Construction de l'app macOS et icône |
 | `version.sh` | Calcul du numéro `V AA.MM.XX` |
