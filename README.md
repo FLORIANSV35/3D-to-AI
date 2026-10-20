@@ -15,6 +15,12 @@ orienter, placer et recadrer le modèle avant l'export.
 - **Repère XYZ = origine d'AI** dessiné dans l'aperçu, avec ses légendes (Z bleu = *Top*, Y vert = *Cours*, X rouge = *Nez*, modifiables dans `theme.py`) : on l'attrape à la souris (ou « origine = point cliqué ») pour
   poser l'origine d'AI exactement où l'on veut sur le modèle.
 - **Recadrage** : boîte min / max, ou **polygone tracé en vue de dessus** ; la partie exclue est grisée.
+- **Relevé topographique depuis internet** (au lieu d'un OBJ) : on **trace un polygone sur une carte satellite** (Esri, orthophoto IGN
+  ou plan OpenStreetMap ; recherche d'adresse, zoom à la molette) ou on indique une adresse + une taille, et l'app télécharge le relief
+  et construit le maillage 3D, découpé selon le polygone. Sources gratuites, sans clé : **IGN Géoplateforme** (France : terrain nu RGE ALTI
+  ou surface avec bâtiments et arbres, pas de 1 m), **AWS Terrain Tiles** (monde, 3 à 30 m) ; adresses via OpenStreetMap Nominatim.
+  L'aperçu 3D est texturé avec l'image satellite ; le DAE exporté reste sans texture (AI les ignore). Ligne de commande :
+  `python3 topo.py "adresse" sortie.dae --size 600`.
 - **Export DAE compatible AI** (voir ci-dessous), unités et axe vertical convertis, réduction optionnelle du nombre de triangles.
 
 ## Lancer depuis le code source

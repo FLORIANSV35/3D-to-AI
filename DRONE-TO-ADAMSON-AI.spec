@@ -13,7 +13,7 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[],
-    hiddenimports=["PIL._tkinter_finder"],
+    hiddenimports=["PIL._tkinter_finder", "PIL.ImageTk"],
     hookspath=[],
     runtime_hooks=[],
     # l'app n'utilise que numpy + tkinter (+ Pillow facultatif) : on écarte le reste pour garder un bundle léger

@@ -13,7 +13,9 @@ import numpy as np
 
 import obj2dae
 import settings
+import mapview
 import theme
+import topo
 import updater
 from preview3d import Preview
 
@@ -98,6 +100,16 @@ class App(_Root):
         self.normals = tk.BooleanVar(value=True)
         self.decim = tk.BooleanVar(value=False)
         self.target = tk.StringVar(value="200000")
+        pr = settings.load()
+        self.topo_place = tk.StringVar(value=pr.get("topo_place", ""))
+        self.topo_size = tk.StringVar(value=str(pr.get("topo_size", 500)))
+        self.topo_source = tk.StringVar(value=pr.get("topo_source", topo.SOURCES[0]))
+        self.topo_kind = tk.StringVar(value=topo.KINDS[0])
+        self.topo_exag = tk.StringVar(value="1")
+        self.topo_poly = [tuple(p) for p in pr.get("topo_poly", [])] or None  # dernier polygone dessiné
+        self.topo_view = tuple(pr["topo_view"]) if pr.get("topo_view") else None  # (lat, lon, zoom) de la carte
+        self.topo_layer = pr.get("topo_layer")
+        self.topo_tex = tk.BooleanVar(value=bool(pr.get("topo_texture", True)))
         self.auto_update = tk.BooleanVar(value=bool(settings.load().get("check_updates", True)))
         self._update = None  # dernière réponse de la recherche de mise à jour
 
@@ -249,7 +261,39 @@ class App(_Root):
         self.preview.render()
 
     def _page_model(self, p):
-        self._section(p, "Fichier", first=True)
+        self._section(p, "Relevé topographique (internet)", first=True)
+        ttk.Button(p, text="Dessiner la zone sur la carte…", style="Accent.TButton", command=self.open_map).pack(fill="x")
+        self._hint(p, "Carte satellite : tu traces un polygone, seul le relief à l'intérieur est récupéré.")
+        g = ttk.Frame(p)
+        g.pack(fill="x", pady=(4, 0))
+        g.columnconfigure(1, weight=1)
+        ttk.Label(g, text="Source").grid(row=0, column=0, sticky="w", pady=3, padx=(0, 10))
+        self._combo(g, self.topo_source, list(topo.SOURCES), 30).grid(row=0, column=1, sticky="w", pady=3)
+        ttk.Label(g, text="Type").grid(row=1, column=0, sticky="w", pady=3, padx=(0, 10))
+        self._combo(g, self.topo_kind, list(topo.KINDS), 30).grid(row=1, column=1, sticky="w", pady=3)
+        ttk.Label(g, text="Relief ×").grid(row=2, column=0, sticky="w", pady=3, padx=(0, 10))
+        ttk.Entry(g, textvariable=self.topo_exag, width=9).grid(row=2, column=1, sticky="w", pady=3)
+        ttk.Checkbutton(p, text="Plaquer l'image satellite (aperçu)", variable=self.topo_tex,
+                        command=lambda: settings.save({**settings.load(), "topo_texture": self.topo_tex.get()})
+                        ).pack(anchor="w", pady=(4, 0))
+        self.lbl_topo = ttk.Label(p, text="", style="Muted.TLabel", wraplength=SIDE_W - 50)
+        self.lbl_topo.pack(anchor="w", pady=(4, 0))
+
+        ttk.Label(p, text="Ou autour d'une adresse :", style="Muted.TLabel").pack(anchor="w", pady=(10, 2))
+        e = ttk.Entry(p, textvariable=self.topo_place)
+        e.pack(fill="x")
+        e.bind("<Return>", lambda ev: self.fetch_topo())
+        r = ttk.Frame(p)
+        r.pack(fill="x", pady=(4, 0))
+        ttk.Label(r, text="Côté (m)").pack(side="left", padx=(0, 8))
+        ttk.Entry(r, textvariable=self.topo_size, width=7).pack(side="left")
+        self.btn_topo = ttk.Button(r, text="Télécharger", style="Tool.TButton", command=self.fetch_topo)
+        self.btn_topo.pack(side="left", padx=(10, 0))
+        self._hint(p, "Adresse, ville, lieu-dit ou « latitude, longitude ». Données : IGN Géoplateforme (Licence Ouverte, "
+                      "France, pas de 1 m), AWS Terrain Tiles (SRTM/NASADEM…, monde), OpenStreetMap. Le DAE est centré sur "
+                      "la zone, l'altitude du point le plus bas est ramenée à 0.")
+
+        self._section(p, "Ou un fichier OBJ")
         ttk.Button(p, text="Ouvrir un .obj…", style="Tool.TButton", command=self.open_dialog).pack(fill="x")
         self.lbl_file = ttk.Label(p, text="Aucun fichier", wraplength=SIDE_W - 50, foreground=theme.WHITE)
         self.lbl_file.pack(anchor="w", pady=(8, 0))
@@ -440,6 +484,54 @@ class App(_Root):
         p = filedialog.askopenfilename(title="Choisir un OBJ", filetypes=[("Wavefront OBJ", "*.obj")])
         if p:
             self.load(p)
+
+    def open_map(self):
+        pr = settings.load()
+        view = self.topo_view or (46.6, 2.5, 6)
+        dlg = mapview.MapDialog(self, self._on_map_ok, view, self.topo_poly, self.topo_layer, pr.get("topo_label", ""))
+        dlg.search.set(self.topo_place.get())
+
+    def _on_map_ok(self, poly, view, label, layer):
+        self.topo_poly, self.topo_view, self.topo_layer = poly, view, layer
+        prefs = settings.load()
+        prefs.update(topo_poly=[list(p) for p in poly], topo_view=list(view), topo_layer=layer, topo_label=label)
+        settings.save(prefs)
+        self.fetch_topo(poly, label)
+
+    def fetch_topo(self, poly=None, label=None):
+        """Télécharge le relief : d'un polygone dessiné sur la carte, sinon d'un carré autour de l'adresse saisie."""
+        try:
+            size = float(self.topo_size.get().replace(",", "."))
+            exag = float(self.topo_exag.get().replace(",", "."))
+        except ValueError:
+            messagebox.showwarning("Relevé topographique", "Taille de zone ou facteur de relief invalide.")
+            return
+        place, source, kind = self.topo_place.get().strip(), self.topo_source.get(), self.topo_kind.get()
+        prefs = settings.load()
+        prefs.update(topo_place=place, topo_size=size, topo_source=source, topo_texture=self.topo_tex.get())
+        tex = (self.topo_layer if self.topo_layer in topo.TILE_LAYERS else next(iter(topo.TILE_LAYERS))) \
+            if self.topo_tex.get() else None
+        settings.save(prefs)
+        self.src = None
+        self.mesh = None
+        self.btn.config(state="disabled")
+        self.btn_topo.config(state="disabled")
+        self.lbl_file.config(text=label or place or "Relevé topographique")
+        self.lbl_stats.config(text="Téléchargement en cours…")
+        self.lbl_topo.config(text="")
+
+        def work():
+            try:
+                prog = lambda f, t: self.q.put(("prog", f, t))  # noqa: E731
+                if poly:
+                    m, info = topo.build_polygon(poly, label or "Zone dessinée", source, kind, 0.0, exag, prog, tex)
+                else:
+                    m, info = topo.build(place, size, source, kind, 0.0, exag, prog, tex)
+                self.q.put(("loaded", m, "Z", info))
+            except Exception as e:  # noqa: BLE001
+                self.q.put(("error", str(e)))
+
+        threading.Thread(target=work, daemon=True).start()
 
     def load(self, path):
         if not path.lower().endswith(".obj"):
@@ -751,7 +843,8 @@ class App(_Root):
             return
         dst = filedialog.asksaveasfilename(
             title="Enregistrer le DAE", defaultextension=".dae",
-            initialfile=os.path.splitext(os.path.basename(self.src))[0] + ".dae",
+            initialfile=(os.path.splitext(os.path.basename(self.src))[0] if self.src
+                         else (self.lbl_file.cget("text") or "releve").strip().replace("/", "-") or "releve") + ".dae",
             filetypes=[("Collada", "*.dae")])
         if not dst:
             return
@@ -763,7 +856,8 @@ class App(_Root):
 
         def work():
             try:
-                st = obj2dae.convert(self.src, dst, progress=lambda f, t: self.q.put(("prog", f, t)), **args)
+                st = obj2dae.convert(self.src, dst, progress=lambda f, t: self.q.put(("prog", f, t)),
+                                    mesh=None if self.src else self.mesh, **args)
                 self.q.put(("done", dst, st))
             except Exception as e:  # noqa: BLE001
                 self.q.put(("error", str(e)))
@@ -786,7 +880,20 @@ class App(_Root):
                     self.bar["value"] = 0
                     self.lbl_status.config(text="")
                     self.btn.config(state="normal")
-                    self.src_up.set(obj2dae.guess_up_axis(self.mesh.verts))
+                    self.btn_topo.config(state="normal")
+                    if len(msg) > 2:  # relevé topographique : mètres, Z vertical, centré sur le lieu
+                        info = msg[3]
+                        self.src_up.set(msg[2])
+                        self.unit.set("mètres (m)")
+                        self.scale.set("1.0")
+                        self.floor.set(True)
+                        self.lbl_file.config(text=info["label"].split(",")[0])
+                        self.lbl_topo.config(text="%s · pas ≈ %.1f m · altitude %.0f → %.0f m · emprise %.0f × %.0f m · %.2f ha" % (
+                            info["source"], info["step"], info["zmin"], info["zmax"], *info["size"], info["area"] / 1e4)
+                            + (f"\nImage satellite : {info['texture']}" if info.get("texture") else "")
+                            + (f"\nImage satellite indisponible : {info['texture_error']}" if info.get("texture_error") else ""))
+                    else:
+                        self.src_up.set(obj2dae.guess_up_axis(self.mesh.verts))
                     self.refresh(keep_view=False)
                 elif kind == "done":
                     st = msg[2]
@@ -802,6 +909,7 @@ class App(_Root):
                 elif kind == "update_err":
                     self._on_update_error(msg[1], msg[2])
                 elif kind == "error":
+                    self.btn_topo.config(state="normal")
                     self.btn.config(state="normal" if self.mesh else "disabled")
                     self.lbl_status.config(text="Erreur")
                     self.lbl_stats.config(text="")

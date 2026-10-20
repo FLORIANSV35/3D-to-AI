@@ -482,11 +482,12 @@ def write_dae(mesh, path, up_axis="Z", with_normals=True, single_group=True, pro
 
 def convert(src, dst, unit_factor=1.0, src_up="Y", dst_up="Z", center=False,
             target_tris=None, with_normals=True, rot=None, floor=False, offset=None, single_group=True,
-            crop=None, progress=_noop):
-    """crop : (lo, hi) ou (lo, hi, polygone) : boîte (x, y, z) en mètres dans le repère de sortie (après
+            crop=None, progress=_noop, mesh=None):
+    """mesh : maillage déjà en mémoire (relevé topographique) ; sinon on lit src.
+    crop : (lo, hi) ou (lo, hi, polygone) : boîte (x, y, z) en mètres dans le repère de sortie (après
     placement) ; le polygone, optionnel, est une liste de points (h1, h2) sur les axes horizontaux de sortie
     (X, Y si la sortie est Z-up ; X, Z si elle est Y-up)."""
-    mesh = load_obj(src, progress)
+    mesh = mesh if mesh is not None else load_obj(src, progress)
     stats = {"tris_in": len(mesh.tris), "verts_in": len(mesh.verts)}
     mesh = transform(mesh, unit_factor, src_up, dst_up, center, rot, floor, offset)
     if crop is not None:
