@@ -98,8 +98,8 @@ class App(_Root):
         self.show_axes = tk.BooleanVar(value=True)
         self.single = tk.BooleanVar(value=True)
         self.normals = tk.BooleanVar(value=True)
-        self.decim = tk.BooleanVar(value=False)
-        self.target = tk.StringVar(value="200000")
+        self.decim = tk.BooleanVar(value=True)  # limite de triangles activée par défaut
+        self.target = tk.StringVar(value="1000")
         pr = settings.load()
         self.topo_place = tk.StringVar(value=pr.get("topo_place", ""))
         self.topo_size = tk.StringVar(value=str(pr.get("topo_size", 500)))
@@ -209,7 +209,7 @@ class App(_Root):
         self.lbl_pick = Console(cons)
         self.lbl_pick.pack(fill="x")
         cons.bind("<Configure>", lambda e: self.lbl_pick.configure(wraplength=max(e.width - 24, 100)))
-        self.preview = Preview(right, self.on_gizmo_moved)
+        self.preview = Preview(right, self.on_gizmo_moved, self._commit_rot, lambda t: self.lbl_pick.config(text=t))
         self.preview.pack(side="top", fill="both", expand=True)
 
         # ---- contenu des onglets ----
@@ -333,7 +333,7 @@ class App(_Root):
                         command=self._save_prefs).pack(anchor="w", pady=(6, 0))
         self._hint(p, "Vue 3D : glisser = tourner · clic droit + glisser (ou Maj + glisser) = déplacer · molette = zoom "
                       "vers le curseur · double-clic = recentrer. "
-                      "Le repère XYZ est l'origine d'AI (Z bleu = Top, Y vert = Cours, X rouge = Nez) : attrape son centre ou une flèche "
+                      "Anneaux du repère = rotation autour de l'axe. Le repère XYZ est l'origine d'AI (Z bleu = Top, Y vert = Cours, X rouge = Nez) : attrape son centre ou une flèche "
                       "et glisse pour déplacer le modèle.")
 
     def _xyz_row(self, p, vars_, width=9, header=True, cb=None):
@@ -357,6 +357,9 @@ class App(_Root):
             ttk.Label(g, text=axis, style="Header.TLabel", width=3).grid(row=i, column=0, sticky="nsew", pady=1)
             ttk.Button(g, text="−90°", command=lambda i=i: self.rot90(i, -90)).grid(row=i, column=1, sticky="ew", padx=(2, 0), pady=1)
             ttk.Button(g, text="+90°", command=lambda i=i: self.rot90(i, 90)).grid(row=i, column=2, sticky="ew", padx=(2, 0), pady=1)
+
+        self._hint(p, "Le modèle reste fixe à l'écran : c'est le repère XYZ (l'origine d'AI) qui pivote. Boutons ±90°, ou attrape "
+                      "un anneau (rouge = X, vert = Y, bleu = Z) du repère dans la vue 3D et glisse : aimant tous les 15°.")
 
         self._section(p, "Réglage fin (degrés)")
         self._xyz_row(p, self.rot, cb=self.on_rot_change)
@@ -417,7 +420,7 @@ class App(_Root):
         ttk.Label(r, text="Cible").pack(side="left", padx=(24, 8))
         ttk.Entry(r, textvariable=self.target, width=11).pack(side="left")
         self._hint(p, "AI lit un seul groupe de triangles et peut manquer de mémoire sur de très gros maillages : "
-                      "réduis-les (200 000 est un bon départ).")
+                      "réduis-les (1 000 par défaut : monte la cible si le résultat est trop grossier).")
 
     # --- mises à jour ----------------------------------------------------------
     def _save_prefs(self):
@@ -634,6 +637,11 @@ class App(_Root):
                 self.crop[(ax, "max")].set(self._fmt(corners[:, k].max()))
 
     def rot90(self, axis, deg):
+        """Pas de rotation autour du repère XYZ : le modèle pivote à l'écran autour de l'axe, puis on valide."""
+        self.preview.animate_rotation(axis, deg, self._commit_rot)
+
+    def _commit_rot(self, axis, deg):
+        """Valide une rotation faite à l'écran (anneau ou bouton) : ajoutée autour de l'axe `axis` du repère."""
         self.set_rot(*obj2dae.rotate_world(self.get_rot(), axis, deg))
 
     def do_level(self):
@@ -831,7 +839,8 @@ class App(_Root):
                 (x0, y0, z0), (x1, y1, z1) = box
                 box = ((x0, -z1, y0), (x1, -z0, y1))
         poly = self._poly_to_zup() if box is not None else None
-        self.preview.set_points(pts, nrm, cols, keep_view=keep_view, crop=box, poly=poly)
+        self.preview.set_points(pts, nrm, cols, keep_view=keep_view, crop=box, poly=poly,
+                                 frame=obj2dae.rotation_matrix(*self.get_rot()))
 
     # --- conversion -------------------------------------------------------
     def convert(self):
@@ -876,7 +885,6 @@ class App(_Root):
                     self.mesh = msg[1]
                     nt = len(self.mesh.tris)
                     self.lbl_stats.config(text=f"{len(self.mesh.verts):,} sommets · {nt:,} triangles".replace(",", " "))
-                    self.decim.set(nt > 500_000)
                     self.bar["value"] = 0
                     self.lbl_status.config(text="")
                     self.btn.config(state="normal")

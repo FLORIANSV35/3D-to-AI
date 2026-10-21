@@ -9,8 +9,9 @@ orienter, placer et recadrer le modèle avant l'export.
 ## Fonctions
 - **Aperçu 3D fluide** du maillage (surface échantillonnée, textures / couleurs du `.mtl` si présentes).
   Glisser = tourner · clic droit + glisser (ou Maj + glisser) = déplacer · molette = zoom vers le curseur.
-- **Placement** : rotation par pas de 90° **autour du repère XYZ** (le modèle tourne comme un solide autour de l'origine d'AI ;
-  pour pivoter autour d'un point, on y pose d'abord l'origine), réglage fin en degrés, mise à niveau automatique du sol,
+- **Placement** : rotation **autour du repère XYZ** (le modèle tourne comme un solide autour de l'origine d'AI ;
+  pour pivoter autour d'un point, on y pose d'abord l'origine). À l'écran **le modèle reste fixe et c'est le repère qui pivote** :
+  boutons ±90° (animés) ou **anneaux** rouge / vert / bleu autour du repère à attraper et glisser (aimant tous les 15°), réglage fin en degrés, mise à niveau automatique du sol,
   position X / Y / Z en mètres, centrage, sol à Z = 0.
 - **Repère XYZ = origine d'AI** dessiné dans l'aperçu, avec ses légendes (Z bleu = *Top*, Y vert = *Cours*, X rouge = *Nez*, modifiables dans `theme.py`) : on l'attrape à la souris (ou « origine = point cliqué ») pour
   poser l'origine d'AI exactement où l'on veut sur le modèle.
@@ -21,7 +22,7 @@ orienter, placer et recadrer le modèle avant l'export.
   ou surface avec bâtiments et arbres, pas de 1 m), **AWS Terrain Tiles** (monde, 3 à 30 m) ; adresses via OpenStreetMap Nominatim.
   L'aperçu 3D est texturé avec l'image satellite ; le DAE exporté reste sans texture (AI les ignore). Ligne de commande :
   `python3 topo.py "adresse" sortie.dae --size 600`.
-- **Export DAE compatible AI** (voir ci-dessous), unités et axe vertical convertis, réduction optionnelle du nombre de triangles.
+- **Export DAE compatible AI** (voir ci-dessous), unités et axe vertical convertis, réduction du nombre de triangles (activée par défaut, cible 1 000).
 
 ## Lancer depuis le code source
 ```bash

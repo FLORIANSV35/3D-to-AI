@@ -49,9 +49,19 @@ def _sprite(text, rgb, size):
 
 
 class Preview(tk.Label):
-    def __init__(self, master, on_moved=None):
+    def __init__(self, master, on_moved=None, on_rotated=None, on_status=None):
         super().__init__(master, bg=theme.VIEWPORT, cursor="fleur", bd=0, highlightthickness=0)
         self.on_moved = on_moved  # fin de glissement du repère : delta (m, repère Z vertical)
+        self.on_rotated = on_rotated  # fin d'une rotation sur un anneau / par bouton : (axe 0-2, degrés)
+        self.on_status = on_status  # texte d'état pendant la rotation (angle)
+        self._ring_hot = None  # anneau survolé ou saisi : 'X' / 'Y' / 'Z'
+        self._anim = False
+        # Vue ancrée sur le MODÈLE : la rotation saisie ne fait pas bouger le modèle à l'écran, c'est le repère XYZ
+        # (et la zone de recadrage) qui pivote. frame_pts s'applique aux points, frame_ov au repère et aux tracés ;
+        # ils sont égaux au repos et ne diffèrent que pendant un geste de rotation.
+        self.frame_pts = np.eye(3)
+        self.frame_ov = np.eye(3)
+        self.ov_shift = np.zeros(3)  # translation du repère pendant un geste : il pivote autour de SON origine
         self.unit_m = 1.0  # mètres par unité normalisée
         self._grab = None
         self.pick_cb = None  # si défini : le prochain clic choisit un point du modèle
@@ -92,7 +102,7 @@ class Preview(tk.Label):
 
     # ------------------------------------------------------------------ données
     def set_points(self, zup, normals=None, colors=None, origin=(0.0, 0.0, 0.0), keep_view=False,
-                   crop=None, poly=None, max_points=250_000):
+                   crop=None, poly=None, max_points=250_000, frame=None):
         """zup : (N,3) en repère Z vertical, déjà placés. origin : où se trouve (0,0,0) de la sortie."""
         if len(zup) > max_points:
             keep = np.random.default_rng(0).choice(len(zup), max_points, replace=False)
@@ -107,10 +117,18 @@ class Preview(tk.Label):
             inside &= obj2dae.points_in_polygon(zup[:, :2], poly)
         self.outside = None if inside is None else ~inside
 
-        c = (zup.max(axis=0) + zup.min(axis=0)) / 2
         disp = lambda q: np.stack([q[..., 0], q[..., 2], -q[..., 1]], axis=-1)  # affichage Y vertical
+        # frame : matrice de rotation du modèle (sortie = R · source). Centre et échelle sont pris dans le repère du
+        # modèle, pour que le modèle ne bouge pas à l'écran quand la rotation change.
+        R = np.eye(3) if frame is None else np.asarray(frame, dtype=float)
+        zm = zup @ R
+        cm = (zm.max(axis=0) + zm.min(axis=0)) / 2
+        c = R @ cm
         p = disp(zup - c)
-        k = max(np.abs(p).max(), 1e-12)
+        k = max(np.abs(zm - cm).max(), 1e-12)
+        D = np.array([[1.0, 0, 0], [0, 0, 1], [0, -1, 0]])
+        self.frame_pts = self.frame_ov = D @ R.T @ D.T  # repère de sortie -> repère du modèle (affichage)
+        self.ov_shift = np.zeros(3)
         self.pts = p / k
         self.pts32 = np.ascontiguousarray(self.pts, dtype=np.float32)
         self.origin = disp(np.asarray(origin, dtype=float) - c) / k
@@ -142,17 +160,22 @@ class Preview(tk.Label):
         self.zoom, self.pan = 1.0, [0.0, 0.0]
         self.render()
 
-    def _rot(self):
-        """Lignes (x écran, y écran, profondeur) de la rotation courante, en float32."""
+    def _cam(self):
+        """Rotation de la caméra (lignes : x écran, y écran, profondeur), en float64."""
         cy, sy, cp, sp = np.cos(self.yaw), np.sin(self.yaw), np.cos(self.pitch), np.sin(self.pitch)
         return np.array([[cy, 0, sy],
                          [sp * sy, cp, -sp * cy],
-                         [-cp * sy, sp, cp * cy]], dtype=np.float32)
+                         [-cp * sy, sp, cp * cy]])
+
+    def _rot(self, pts=False):
+        """Rotation courante en float32 : caméra × repère du modèle."""
+        return (self._cam() @ (self.frame_pts if pts else self.frame_ov)).astype(np.float32)
 
     def _project(self, P, w, h):
         """P (N,3) normalisés -> (px, py, profondeur) en flottants (profondeur plus grande = plus proche)."""
         r = self._rot().astype(np.float64)
-        x1, y2, z2 = (np.asarray(P, dtype=np.float64) @ r.T).T
+        off = self._cam() @ self.ov_shift if np.any(self.ov_shift) else 0.0
+        x1, y2, z2 = (np.asarray(P, dtype=np.float64) @ r.T + off).T
         s = min(w, h) * 0.45 * self.zoom
         return w / 2 + (x1 + self.pan[0]) * s, h / 2 - (y2 + self.pan[1]) * s, z2
 
@@ -191,7 +214,7 @@ class Preview(tk.Label):
         canvas = np.full(h * w, _pk(theme.VIEWPORT_RGB), dtype=np.uint32)
         if self.pts32 is not None:
             n = len(self.pts32) if not self._interactive else min(len(self.pts32), LOD_POINTS)
-            P = self.pts32[:n] @ self._rot().T  # x écran, y écran, profondeur
+            P = self.pts32[:n] @ self._rot(True).T  # x écran, y écran, profondeur
             s = np.float32(min(w, h) * 0.45 * self.zoom)
             px = (w / 2 + (P[:, 0] + self.pan[0]) * s).astype(np.int32)
             py = (h / 2 - (P[:, 1] + self.pan[1]) * s).astype(np.int32)
@@ -274,6 +297,20 @@ class Preview(tk.Label):
                             reg = rgba[cy0:cy1, cx0:cx1, :3]
                             reg[:] = (reg * (1 - a_) + c_ * a_).astype(np.uint8)
 
+        # anneaux de rotation autour de chaque axe : on les saisit pour tourner le modèle autour de cet axe
+        if self.show_axes and self.origin is not None:
+            od = float(self._project(self.origin[None, :], w, h)[2][0])
+            for name, colr in (("X", theme.AXIS_X), ("Y", theme.AXIS_Y), ("Z", theme.AXIS_Z)):
+                hot = name == self._ring_hot
+                sx, sy, sd = self._project(self._ring(name, 480)[0], w, h)
+                sx, sy = sx.astype(int), sy.astype(int)
+                ok = (sx >= 2) & (sx < w - 2) & (sy >= 2) & (sy < h - 2)
+                front = sd >= od
+                bright = tuple(int(c + (255 - c) * 0.55) for c in colr) if hot else colr
+                dim = tuple(int(c * (0.7 if hot else 0.45)) for c in colr)
+                paint(sx[ok & ~front], sy[ok & ~front], dim, thick if hot else (0,))
+                paint(sx[ok & front], sy[ok & front], bright, thick)
+
         vw = lambda x, y, z: np.array([x - self.c[0], z - self.c[2], -(y - self.c[1])]) / self.unit_m
         if self.poly_mode and self.draft:  # tracé en cours
             zc = self.c[2]
@@ -314,8 +351,20 @@ class Preview(tk.Label):
         px, py, _ = self._project(np.array([[0.0, 0, 0], d]), w, h)
         return np.array([px[1] - px[0], py[1] - py[0]])
 
+    RING_R = 0.2  # rayon des anneaux de rotation (unités normalisées)
+
+    def _ring(self, name, n=120):
+        """Points de l'anneau autour de l'axe `name` + (axe, u, v) : base directe (u × v = axe) du plan de l'anneau."""
+        a = np.array(self.AXES[name], dtype=float)
+        h = np.array([0.0, 1.0, 0.0]) if abs(a[1]) < 0.9 else np.array([1.0, 0.0, 0.0])
+        u = np.cross(a, h)
+        u /= np.linalg.norm(u)
+        v = np.cross(a, u)
+        t = np.linspace(0, 2 * np.pi, n, endpoint=False)[:, None]
+        return self.origin + self.RING_R * (np.cos(t) * u + np.sin(t) * v), (a, u, v)
+
     def _hit(self, x, y):
-        """'C' (centre), 'X'/'Y'/'Z' (flèche) ou None."""
+        """'C' (centre), 'X'/'Y'/'Z' (flèche), 'RX'/'RY'/'RZ' (anneau de rotation) ou None."""
         if self.origin is None or self.pts is None or not self.show_axes:
             return None
         w, h = self._size()
@@ -328,12 +377,23 @@ class Preview(tk.Label):
             t = np.clip(np.dot(p - o, v) / max(np.dot(v, v), 1e-9), 0, 1)
             if np.hypot(*(p - (o + t * v))) < 8:
                 return name
-        return None
+        best, hit = 8.0, None  # anneau de rotation le plus proche du curseur
+        for name in self.AXES:
+            sx, sy, _ = self._project(self._ring(name)[0], w, h)
+            d = np.hypot(sx - x, sy - y).min()
+            if d < best:
+                best, hit = d, "R" + name
+        return hit
 
     def _hover(self, e):
         if self.pick_cb or self.poly_mode:
             return
-        self.configure(cursor="hand2" if self._hit(e.x, e.y) else "fleur")
+        hit = self._hit(e.x, e.y)
+        hot = hit[1] if hit and hit[0] == "R" else None
+        if hot != self._ring_hot:
+            self._ring_hot = hot
+            self.request_render()
+        self.configure(cursor="exchange" if hot else ("hand2" if hit else "fleur"))
 
     # --- choix d'un point du modèle -------------------------------------------
     def start_pick(self, cb):
@@ -394,12 +454,16 @@ class Preview(tk.Label):
             cb(pts)
 
     def _unproject(self, x, y):
-        """Pixel -> (X, Y) en mètres, valable en vue de dessus (yaw 0, pitch 90°)."""
+        """Pixel -> (X, Y) en mètres sur le plan horizontal (Z de sortie = centre du modèle) du repère de sortie."""
         W, H = self._size()
         s = min(W, H) * 0.45 * self.zoom
-        x1 = (x - W / 2) / s - self.pan[0]
-        y2 = (H / 2 - y) / s - self.pan[1]
-        return (self.c[0] + x1 * self.unit_m, self.c[1] + y2 * self.unit_m)
+        x1, y_ = (x - W / 2) / s - self.pan[0], (H / 2 - y) / s - self.pan[1]
+        t = self._rot().astype(float)
+        if abs(t[2, 1]) < 1e-3:  # plan vu de chant : ni point ni polygone possible
+            return (self.c[0], self.c[1])
+        z = (0.0 - x1 * t[0, 1] - y_ * t[1, 1]) / t[2, 1]
+        d = x1 * t[0] + y_ * t[1] + z * t[2]  # point d'affichage (Y vertical, centré)
+        return (self.c[0] + d[0] * self.unit_m, self.c[1] - d[2] * self.unit_m)
 
     def _poly_click(self, x, y):
         if self.pts is None:
@@ -449,11 +513,102 @@ class Preview(tk.Label):
             cb(self._pick(e.x, e.y) if self.pts is not None else None)
             return
         self._last = (e.x, e.y)
+        if self._anim:
+            return
         hit = self._hit(e.x, e.y)
         self._grab = {"hit": hit, "start": (e.x, e.y), "o0": self.origin.copy()} if hit else None
+        if hit and hit[0] == "R":
+            self._begin_ring(hit[1], e.x, e.y)
+
+    # --- rotation sur un anneau ---------------------------------------------------
+    @staticmethod
+    def _wrap(deg):
+        return (deg + 180.0) % 360.0 - 180.0
+
+    def _begin_ring(self, name, x, y):
+        """Début de glissement sur un anneau : angle de départ dans le plan de l'anneau (ou, si l'anneau est vu de
+        chant, déplacement le long de la tangente de l'anneau). Mesures faites avec le repère du début du geste."""
+        g = self._grab
+        g.update(axis=name, M0=self.frame_ov.copy(), deg=0.0, theta0=None)
+        g["T0"] = self._rot().astype(float)
+        self._ring_hot = name
+        a = self.AXES[name]
+        if abs(np.dot(a, g["T0"][2])) >= 0.2:
+            g["theta0"] = self._ring_theta(name, x, y, g["T0"])
+        else:  # anneau de chant : le plan ne se projette pas, on suit la tangente à l'écran
+            w, h = self._size()
+            sx, sy, _ = self._project(self._ring(name, 360)[0], w, h)
+            i = int(np.argmin(np.hypot(sx - x, sy - y)))
+            tg = np.array([sx[(i + 1) % 360] - sx[i - 1], sy[(i + 1) % 360] - sy[i - 1]])
+            g["tangent"] = tg / max(np.hypot(*tg), 1e-9)
+
+    def _ring_theta(self, name, x, y, r):
+        """Angle (degrés) du point de l'écran (x, y) projeté sur le plan de l'anneau, autour de l'axe ; r = rotation
+        écran (lignes x, y, profondeur) à utiliser."""
+        W, H = self._size()
+        s = min(W, H) * 0.45 * self.zoom
+        x1, y2 = (x - W / 2) / s - self.pan[0], (H / 2 - y) / s - self.pan[1]
+        _, (a, u, v) = self._ring(name, 4)
+        z = (np.dot(a, self.origin) - np.dot(a, r[0]) * x1 - np.dot(a, r[1]) * y2) / np.dot(a, r[2])
+        p = x1 * r[0] + y2 * r[1] + z * r[2] - self.origin
+        return float(np.degrees(np.arctan2(np.dot(p, v), np.dot(p, u))))
+
+    @staticmethod
+    def _rodrigues(a, deg):
+        t = np.radians(deg)
+        K = np.array([[0, -a[2], a[1]], [a[2], 0, -a[0]], [-a[1], a[0], 0]])
+        return np.eye(3) + np.sin(t) * K + (1 - np.cos(t)) * (K @ K)
+
+    def _turn_axes(self, name, deg, M0):
+        """Fait pivoter le repère XYZ (et la zone de recadrage) de `deg` autour de l'axe `name`, le modèle reste fixe."""
+        rod = self._rodrigues(np.array(self.AXES[name], dtype=float), deg)
+        self.frame_ov = M0 @ rod
+        self.ov_shift = M0 @ (self.origin - rod @ self.origin)  # le pivot est l'origine du repère, pas le centre du modèle
+
+    def _drag_ring(self, e):
+        g = self._grab
+        name = g["axis"]
+        if g["theta0"] is not None:
+            deg = self._wrap(self._ring_theta(name, e.x, e.y, g["T0"]) - g["theta0"])
+            deg += 360.0 * round((g["deg"] - deg) / 360.0)  # continuité au-delà de ±180°
+        else:
+            w, h = self._size()
+            rad = self.RING_R * min(w, h) * 0.45 * self.zoom
+            dp = np.array([e.x - g["start"][0], e.y - g["start"][1]], dtype=float)
+            deg = float(np.degrees(np.dot(dp, g["tangent"]) / max(rad, 1.0)))
+        snap = round(deg / 15.0) * 15.0
+        deg = snap if abs(deg - snap) < 2.0 else round(deg, 1)  # aimant sur les multiples de 15°
+        g["deg"] = deg
+        self._turn_axes(name, deg, g["M0"])
+        if self.on_status:
+            self.on_status("Axe %s tourné de %+.1f°" % (name, deg))
+        self.request_render()
+
+    def animate_rotation(self, axis, deg, on_done):
+        """Rotation du MODÈLE de `deg` autour de l'axe 0/1/2 (X/Y/Z) du repère, montrée en faisant pivoter le repère
+        XYZ à l'écran (le modèle reste fixe), puis on_done(axe, degrés). Utilisé par les boutons ±90°."""
+        if self.pts is None or self.origin is None or self._anim or not self.winfo_ismapped():
+            on_done(axis, deg)
+            return
+        name, M0, steps = "XYZ"[axis], self.frame_ov.copy(), 10
+        self._anim, self._ring_hot, self._interactive = True, name, True
+
+        def step(i):
+            t = i / steps
+            self._turn_axes(name, -deg * t * t * (3 - 2 * t), M0)  # le modèle tourne de +deg : le repère de -deg
+            self.render()
+            if i < steps:
+                self.after(16, lambda: step(i + 1))
+            else:
+                self._anim, self._ring_hot, self._interactive = False, None, False
+                on_done(axis, deg)
+
+        step(1)
 
     def _drag_gizmo(self, e):
         g = self._grab
+        if g["hit"][0] == "R":
+            return self._drag_ring(e)
         dp = np.array([e.x - g["start"][0], e.y - g["start"][1]], dtype=float)
         if g["hit"] == "C":  # plan horizontal : directions d'affichage X et -Y
             M = np.stack([self._sdir(np.array(self.AXES["X"])), self._sdir(np.array(self.AXES["Y"]))], axis=1)
@@ -473,6 +628,16 @@ class Preview(tk.Label):
                 self._poly_click(e.x, e.y)
             return
         g, self._grab = self._grab, None
+        if g and g["hit"][0] == "R":
+            self._ring_hot = None
+            if self.on_status:
+                self.on_status("")
+            if abs(g["deg"]) > 1e-6 and self.on_rotated:
+                self.on_rotated("XYZ".index(g["axis"]), -g["deg"])  # le repère a tourné de +deg : le modèle de -deg
+            else:
+                self.frame_ov, self.ov_shift = g["M0"], np.zeros(3)
+                self.request_render()
+            return
         if g and self.on_moved:
             dd = (self.origin - g["o0"]) * self.unit_m  # affichage (x, y vertical, z)
             if np.any(np.abs(dd) > 1e-9):
