@@ -1,4 +1,4 @@
 numpy>=1.26
-Pillow>=10      # textures de l'OBJ (aperçu coloré), carte et image satellite du relevé topographique
-# tkinterdnd2   # facultatif : glisser-déposer d'un .obj dans la fenêtre
-certifi>=2024    # certificats SSL : mise à jour (GitHub) et relevé topographique (internet)
+Pillow>=10      # OBJ textures (coloured preview), map and satellite image of the topographic survey
+# tkinterdnd2   # optional : drag and drop an .obj into the window
+certifi>=2024    # SSL certificates : update check (GitHub) and topographic survey (internet)

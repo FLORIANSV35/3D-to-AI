@@ -1,7 +1,7 @@
-"""Recherche de mise à jour : compare la version de l'app à la dernière release publiée sur GitHub.
+"""Update check : compares the app version with the latest release published on GitHub.
 
-Interroge uniquement l'API publique de GitHub (api.github.com, sans compte ni jeton) ; aucune donnée
-n'est envoyée en dehors de la requête HTTPS elle-même.
+Only queries GitHub's public API (api.github.com, no account or token) ; no data is sent beyond the
+HTTPS request itself.
 """
 import json
 import platform
@@ -10,13 +10,13 @@ import ssl
 import sys
 import urllib.request
 
-REPO = "FLORIANSV35/DRONE-TO-ADAMSON-AI"
+REPO = "FLORIANSV35/3D-to-AI"
 API = f"https://api.github.com/repos/{REPO}/releases/latest"
 _VERSION = re.compile(r"V?\s*(\d{2})\.(\d{2})\.(\d+)", re.I)  # V AA.MM.XX
 
 
 def parse_version(tag):
-    """'V26.10.03' -> (26, 10, 3) ; None si le texte n'est pas un numéro de version (ex. « dev »)."""
+    """'V26.10.03' -> (26, 10, 3) ; None if the text is not a version number (e.g. 'dev')."""
     m = _VERSION.search(tag or "")
     return tuple(int(x) for x in m.groups()) if m else None
 
@@ -27,8 +27,8 @@ def is_newer(latest, current):
 
 
 def _context():
-    """Contexte SSL avec les certificats de certifi : le Python de python.org (et les apps empaquetées)
-    n'ont pas de certificats système, la vérification échouerait sinon."""
+    """SSL context with the certifi certificates : the python.org Python (and packaged apps)
+    have no system certificates, verification would fail otherwise."""
     try:
         import certifi
         return ssl.create_default_context(cafile=certifi.where())
@@ -37,10 +37,10 @@ def _context():
 
 
 def platform_asset(assets, page):
-    """Lien de téléchargement adapté à ce système, sinon la page de la release."""
+    """Download link for this system, otherwise the release page."""
     key = {"darwin": "macos", "win32": "windows"}.get(sys.platform)
     if key == "macos" and platform.machine() != "arm64":
-        return page  # seule une version Apple Silicon est publiée
+        return page  # only an Apple Silicon build is published
     for a in assets or []:
         if key and key in a.get("name", "").lower():
             return a.get("browser_download_url") or page
@@ -48,15 +48,15 @@ def platform_asset(assets, page):
 
 
 def fetch_latest(current, timeout=6):
-    """Dernière release publiée : {tag, name, date, notes, page, download, newer}. Lève une exception si GitHub
-    est injoignable ou répond autre chose qu'une release."""
+    """Latest published release : {tag, name, date, notes, page, download, newer}. Raises if GitHub
+    is unreachable or answers something other than a release."""
     req = urllib.request.Request(API, headers={"Accept": "application/vnd.github+json",
-                                               "User-Agent": f"DRONE-TO-AI/{current}"})
+                                               "User-Agent": f"3D-to-AI/{current}"})
     with urllib.request.urlopen(req, timeout=timeout, context=_context()) as r:
         data = json.load(r)
     tag = data.get("tag_name", "")
     if parse_version(tag) is None:
-        raise ValueError(f"numéro de version illisible dans la release : {tag!r}")
+        raise ValueError(f"unreadable version number in the release: {tag!r}")
     page = data.get("html_url", f"https://github.com/{REPO}/releases")
     return {"tag": tag, "name": data.get("name") or tag, "date": (data.get("published_at") or "")[:10],
             "notes": (data.get("body") or "").strip(), "page": page,

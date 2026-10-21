@@ -1,15 +1,15 @@
 name: Build Windows
 
-# Construit « DRONE-TO-AI-V…-windows-x64.zip » sur un serveur Windows et le joint à la release.
-#  - automatiquement quand une release est publiée ;
-#  - à la demande (Actions → Build Windows → Run workflow), avec le tag d'une release existante pour y joindre le zip.
+# Builds '3D-to-AI-V…-windows-x64.zip' on a Windows server and attaches it to the release.
+#  - automatically when a release is published ;
+#  - on demand (Actions → Build Windows → Run workflow), with the tag of an existing release to attach the zip to.
 on:
   release:
     types: [published]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag de la release à compléter (ex. V26.10.02) ; vide = simple artefact de test"
+        description: "Tag of the release to complete (e.g. V26.10.02) ; empty = plain test artifact"
         required: false
 
 permissions:
@@ -23,21 +23,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # version.sh compte les commits du mois
+          fetch-depth: 0   # version.sh counts the commits of the month
           ref: ${{ env.TAG || github.ref }}
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Dépendances
+      - name: Dependencies
         run: python -m pip install -r requirements-build.txt
 
-      - name: Build + autotests
+      - name: Build + self-tests
         shell: bash
         run: ./build_windows.sh
 
-      - name: Archiver (zip + capture d'écran de l'interface)
+      - name: Archive (zip + interface screenshot)
         uses: actions/upload-artifact@v4
         with:
           name: windows-build
@@ -45,7 +45,7 @@ jobs:
             dist/*.zip
             dist/screenshot-windows.png
 
-      - name: Joindre le zip à la release
+      - name: Attach the zip to the release
         if: ${{ env.TAG != '' }}
         shell: bash
         env:

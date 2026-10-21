@@ -1,7 +1,7 @@
-"""Carte satellite interactive (Tkinter) pour choisir une zone en dessinant un polygone.
+"""Interactive satellite map (Tkinter) to choose an area by drawing a polygon.
 
-Fonds de carte : Esri World Imagery (monde), orthophotographie IGN (France), OpenStreetMap (plan).
-Les tuiles sont téléchargées à la demande dans des threads, puis affichées sur un Canvas.
+Base maps : Esri World Imagery (worldwide), IGN orthophotography (France), OpenStreetMap (street map).
+Tiles are downloaded on demand in threads, then displayed on a Canvas.
 """
 import io
 import math
@@ -23,8 +23,8 @@ TILE = topo.TILE
 MIN_Z, MAX_Z = 3, 19
 LAYERS = topo.TILE_LAYERS
 world_xy = topo.world_xy
-POLY_RGB = (255, 170, 40)  # même orange que le recadrage de l'aperçu 3D
-HIT = 10  # rayon de saisie d'un sommet (px)
+POLY_RGB = (255, 170, 40)  # same orange as the crop of the 3D preview
+HIT = 10  # grab radius of a vertex (px)
 
 
 def world_latlon(x, y, z):
@@ -33,12 +33,12 @@ def world_latlon(x, y, z):
 
 
 class MapDialog(tk.Toplevel):
-    """Fenêtre de choix de zone. `on_ok(polygone [(lat, lon), …], vue (lat, lon, zoom), libellé)` est appelé
-    quand l'utilisateur valide un polygone fermé."""
+    """Area picker window. `on_ok(polygon [(lat, lon), …], view (lat, lon, zoom), label, layer)` is called
+    when the user validates a closed polygon."""
 
     def __init__(self, master, on_ok, view=(46.6, 2.5, 6), poly=None, layer=None, label=""):
         super().__init__(master, bg=theme.BG)
-        self.title("Choisir la zone — carte")
+        self.title("Choose the area — map")
         self.geometry("1100x760+60+40")
         self.minsize(720, 520)
         self.transient(master)
@@ -48,9 +48,9 @@ class MapDialog(tk.Toplevel):
         self.q = queue.Queue()
         self.pool = ThreadPoolExecutor(max_workers=6)
         self.pending = set()
-        self.raw = OrderedDict()  # (couche, z, x, y) -> image PIL | None (échec)
-        self.photos = OrderedDict()  # idem -> PhotoImage (créée dans le thread de l'interface)
-        self.items = {}  # clé de tuile -> id d'objet du canvas
+        self.raw = OrderedDict()  # (layer, z, x, y) -> PIL image | None (failure)
+        self.photos = OrderedDict()  # same -> PhotoImage (created in the interface thread)
+        self.items = {}  # tile key -> canvas item id
         self.lat, self.lon, self.z = view
         self.cx = self.cy = 0.0
         self.pts = [tuple(p) for p in (poly or [])]
@@ -58,7 +58,7 @@ class MapDialog(tk.Toplevel):
         self.drag = None
         self.dbl = False
         self.wheel_acc, self.wheel_t = 0.0, 0.0
-        self._fill = None  # PhotoImage de remplissage du polygone
+        self._fill = None  # PhotoImage filling the polygon
         self._alive = True
         self._build()
         self.protocol("WM_DELETE_WINDOW", self.close)
@@ -85,7 +85,7 @@ class MapDialog(tk.Toplevel):
         e = ttk.Entry(top, textvariable=self.search)
         e.pack(side="left", fill="x", expand=True)
         e.bind("<Return>", lambda ev: (self.goto_place(), "break")[1])
-        ttk.Button(top, text="Aller", style="Tool.TButton", command=self.goto_place).pack(side="left", padx=(6, 12))
+        ttk.Button(top, text="Go", style="Tool.TButton", command=self.goto_place).pack(side="left", padx=(6, 12))
         c = ttk.Combobox(top, textvariable=self.layer, values=list(LAYERS), state="readonly", width=24)
         c.pack(side="left")
         c.bind("<<ComboboxSelected>>", lambda ev: self._layer_changed())
@@ -109,20 +109,20 @@ class MapDialog(tk.Toplevel):
         bar.pack(fill="x", padx=10, pady=(6, 10))
         ttk.Button(bar, text="−", width=3, style="Tool.TButton", command=lambda: self.zoom_step(-1)).pack(side="left")
         ttk.Button(bar, text="+", width=3, style="Tool.TButton", command=lambda: self.zoom_step(1)).pack(side="left", padx=(4, 12))
-        ttk.Button(bar, text="Fermer le polygone", style="Tool.TButton", command=self.close_polygon).pack(side="left")
-        ttk.Button(bar, text="Annuler le dernier point", style="Tool.TButton", command=self.undo).pack(side="left", padx=6)
-        ttk.Button(bar, text="Tout effacer", style="Tool.TButton", command=self.clear).pack(side="left")
-        self.btn_ok = ttk.Button(bar, text="Télécharger le relief", style="Accent.TButton", command=self.validate)
+        ttk.Button(bar, text="Close polygon", style="Tool.TButton", command=self.close_polygon).pack(side="left")
+        ttk.Button(bar, text="Undo last point", style="Tool.TButton", command=self.undo).pack(side="left", padx=6)
+        ttk.Button(bar, text="Clear all", style="Tool.TButton", command=self.clear).pack(side="left")
+        self.btn_ok = ttk.Button(bar, text="Download the terrain", style="Accent.TButton", command=self.validate)
         self.btn_ok.pack(side="right")
         self.info = ttk.Label(bar, text="", style="Muted.TLabel")
         self.info.pack(side="right", padx=14)
         self.hint = ttk.Label(self, style="Muted.TLabel", anchor="w", wraplength=1060, text=(
-            "Clic : ajouter un point · double-clic ou Entrée : fermer le polygone · glisser : déplacer la carte "
-            "(ou un point) · molette : zoom · clic droit ou ⌫ : retirer le dernier point."))
+            "Click: add a point · double-click or Enter: close the polygon · drag: move the map "
+            "(or a point) · wheel: zoom · right-click or ⌫: remove the last point."))
         self.hint.pack(fill="x", padx=10, pady=(0, 8))
         self._update_info()
 
-    # --- tuiles -----------------------------------------------------------------
+    # --- tiles -----------------------------------------------------------------
     def _fetch(self, key):
         layer, z, x, y = key
         try:
@@ -159,7 +159,7 @@ class MapDialog(tk.Toplevel):
                 self.photos.popitem(last=False)
         return ph
 
-    # --- affichage ----------------------------------------------------------------
+    # --- display ----------------------------------------------------------------
     def _canvas_size(self):
         return max(self.cv.winfo_width(), 50), max(self.cv.winfo_height(), 50)
 
@@ -202,7 +202,7 @@ class MapDialog(tk.Toplevel):
     def _draw_overlay(self, w, h):
         self.cv.delete("ov")
         pts = [self.to_canvas(la, lo) for la, lo in self.pts]
-        if len(pts) >= 3 and self.closed:  # remplissage translucide (PIL : Tk n'a pas de transparence)
+        if len(pts) >= 3 and self.closed:  # translucent fill (PIL : Tk has no transparency)
             im = Image.new("RGBA", (int(w), int(h)), (0, 0, 0, 0))
             ImageDraw.Draw(im).polygon(pts, fill=POLY_RGB + (70,))
             self._fill = ImageTk.PhotoImage(im)
@@ -216,7 +216,7 @@ class MapDialog(tk.Toplevel):
             self.cv.create_oval(x - r, y - r, x + r, y + r, fill="#ffffff" if i == 0 else col, outline="#000000", tags="ov")
         txt = LAYERS[self.layer.get()][1]
         t = self.cv.create_text(w - 8, h - 8, text=txt, anchor="se", fill="#ffffff", font=(theme.family(self), 10), tags="ov")
-        bb = self.cv.bbox(t)  # fond sombre derrière l'attribution pour qu'elle reste lisible sur l'imagerie
+        bb = self.cv.bbox(t)  # dark background behind the credit so that it stays readable over the imagery
         self.cv.tag_lower(self.cv.create_rectangle(bb[0] - 4, bb[1] - 2, bb[2] + 4, bb[3] + 2, fill="#000000",
                                                    outline="", tags="ov"), t)
         self.cv.tag_raise("ov")
@@ -228,7 +228,7 @@ class MapDialog(tk.Toplevel):
             return
         w, h = self._canvas_size()
         px, py = (w / 2, h / 2) if px is None else (px, py)
-        la, lo = self.from_canvas(px, py)  # le point sous le curseur reste sous le curseur
+        la, lo = self.from_canvas(px, py)  # the point under the cursor stays under the cursor
         self.z = nz
         x, y = world_xy(la, lo, nz)
         self.cx, self.cy = x - px + w / 2, y - py + h / 2
@@ -240,13 +240,13 @@ class MapDialog(tk.Toplevel):
             self.wheel_acc = 0.0
         self.wheel_t = now
         self.wheel_acc += e.delta
-        if abs(self.wheel_acc) >= 3:  # regroupe les micro-événements du trackpad en crans
+        if abs(self.wheel_acc) >= 3:  # groups trackpad micro-events into notches
             d = 1 if self.wheel_acc > 0 else -1
             self.wheel_acc = 0.0
             self.zoom_step(d, e.x, e.y)
 
     def fit(self, pts):
-        """Cadre la vue sur une liste de points (lat, lon)."""
+        """Frame the view on a list of points (lat, lon)."""
         w, h = self._canvas_size()
         for z in range(MAX_Z, MIN_Z - 1, -1):
             xs, ys = zip(*(world_xy(la, lo, z) for la, lo in pts))
@@ -259,7 +259,7 @@ class MapDialog(tk.Toplevel):
         q = self.search.get().strip()
         if not q:
             return
-        self.info.config(text="Recherche…")
+        self.info.config(text="Searching…")
 
         def work():
             try:
@@ -284,7 +284,7 @@ class MapDialog(tk.Toplevel):
             self.cv.delete(self.items.pop(k))
         self.redraw()
 
-    # --- polygone -----------------------------------------------------------------
+    # --- polygon -----------------------------------------------------------------
     def _vertex_at(self, x, y):
         for i, (la, lo) in enumerate(self.pts):
             px, py = self.to_canvas(la, lo)
@@ -303,7 +303,7 @@ class MapDialog(tk.Toplevel):
         if not d["moved"] and abs(e.x - d["x"]) + abs(e.y - d["y"]) < 5:
             return
         d["moved"] = True
-        if d["v"] is not None:  # déplacement d'un sommet
+        if d["v"] is not None:  # moving a vertex
             self.pts[d["v"]] = self.from_canvas(e.x, e.y)
             self._update_info()
         else:
@@ -319,7 +319,7 @@ class MapDialog(tk.Toplevel):
             return
         if self.closed:
             return
-        if d["v"] == 0 and len(self.pts) >= 3:  # clic sur le premier point : on ferme
+        if d["v"] == 0 and len(self.pts) >= 3:  # click on the first point : close
             self.close_polygon()
             return
         self.pts.append(self.from_canvas(e.x, e.y))
@@ -352,15 +352,15 @@ class MapDialog(tk.Toplevel):
         ok = self.closed and len(self.pts) >= 3
         if ok:
             sx, sy, area = topo.poly_extent_m(self.pts)
-            txt = "%d points · emprise %.0f × %.0f m · %s" % (
+            txt = "%d points · extent %.0f × %.0f m · %s" % (
                 len(self.pts), sx, sy, ("%.2f ha" % (area / 1e4)) if area < 1e7 else ("%.1f km²" % (area / 1e6)))
             if max(sx, sy) > 20000:
-                txt, ok = "Zone trop grande (max 20 km de côté)", False
+                txt, ok = "Area too large (max 20 km on a side)", False
             elif max(sx, sy) < 20:
-                txt, ok = "Zone trop petite (min 20 m)", False
+                txt, ok = "Area too small (min 20 m)", False
         else:
-            txt = ("Place au moins 3 points, puis ferme le polygone" if len(self.pts) < 3
-                   else "Ferme le polygone (double-clic ou Entrée)")
+            txt = ("Place at least 3 points, then close the polygon" if len(self.pts) < 3
+                   else "Close the polygon (double-click or Enter)")
         self.info.config(text=txt)
         self.btn_ok.state(["!disabled"] if ok else ["disabled"])
 
@@ -368,7 +368,7 @@ class MapDialog(tk.Toplevel):
         if not (self.closed and len(self.pts) >= 3):
             return
         la, lo = world_latlon(self.cx, self.cy, self.z)
-        poly, view, label = list(self.pts), (la, lo, self.z), self.label or "Zone dessinée"
+        poly, view, label = list(self.pts), (la, lo, self.z), self.label or "Drawn area"
         self.close()
         self.on_ok(poly, view, label, self.layer.get())
 

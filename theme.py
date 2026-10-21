@@ -1,23 +1,23 @@
-"""Thème visuel : fond olive très sombre, grands onglets rectangulaires (actif en blanc), accent brun,
-en-têtes de tableau gris. Palette propre à ce projet, dans l'esprit de l'interface d'ArrayIntelligence."""
+"""Visual theme : very dark olive background, large rectangular tabs (active one in white), brown accent,
+grey table headers. Palette specific to this project, in the spirit of the ArrayIntelligence interface."""
 import sys
 import tkinter.font as tkfont
 from tkinter import ttk
 
 # --- palette ---------------------------------------------------
-BG = "#2c312b"  # fond de fenêtre / marges
-PANEL = "#373936"  # panneaux et zone 3D
-PANEL_2 = "#474c46"  # sous-onglets, barres
-FIELD = "#5b5f5a"  # champs de saisie
-BORDER = "#747973"  # filets des boutons
-EDGE = "#202420"  # contour très sombre des panneaux
-TAB = "#646965"  # onglet inactif
+BG = "#2c312b"  # window background / margins
+PANEL = "#373936"  # panels and 3D area
+PANEL_2 = "#474c46"  # sub-tabs, bars
+FIELD = "#5b5f5a"  # input fields
+BORDER = "#747973"  # button borders
+EDGE = "#202420"  # very dark outline of the panels
+TAB = "#646965"  # inactive tab
 TAB_HI = "#747973"
-BTN = "#4e534d"  # bouton standard
+BTN = "#4e534d"  # standard button
 BTN_HI = "#5d625c"
-ACCENT = "#886e4b"  # brun AI
+ACCENT = "#886e4b"  # AI brown
 ACCENT_HI = "#9b7f58"
-HEADER = "#838281"  # en-tête de tableau
+HEADER = "#838281"  # table header
 TEXT = "#e4e6e2"
 MUTED = "#9ca19b"
 BROWN = "#a58a64"  # titres de section
@@ -29,8 +29,8 @@ VIEWPORT_RGB = (0x37, 0x39, 0x36)
 AXIS_X = (255, 70, 70)
 AXIS_Y = (80, 220, 80)
 AXIS_Z = (90, 140, 255)
-AXIS_LABELS = {"X": "Nez", "Y": "Cours", "Z": "Top"}  # légendes affichées au bout des axes du repère
-HEIGHT_RAMP = ((92, 120, 112), (150, 172, 138), (226, 208, 164))  # bas -> haut du modèle sans texture
+AXIS_LABELS = {"X": "Nose", "Y": "Court", "Z": "Top"}  # labels shown at the end of the axes of the XYZ frame
+HEIGHT_RAMP = ((92, 120, 112), (150, 172, 138), (226, 208, 164))  # bottom -> top of an untextured model
 CROP = (255, 170, 40)
 CROP_DIM = (150, 105, 30)
 CLOSE = (90, 230, 90)
@@ -44,8 +44,8 @@ def family(root):
 
 
 def apply(root):
-    """Applique le thème à toute l'application (ttk 'clam', seul thème qui accepte les couleurs partout)."""
-    if sys.platform == "win32":  # Tk compte 1 pt = 1,33 px sous Windows : on aligne sur macOS (1 pt = 1 px)
+    """Apply the theme to the whole app (ttk 'clam', the only theme that accepts colours everywhere)."""
+    if sys.platform == "win32":  # Tk counts 1 pt = 1.33 px on Windows : align with macOS (1 pt = 1 px)
         root.tk.call("tk", "scaling", 1.0)
     fam = family(root)
     base = (fam, 12)
@@ -53,8 +53,8 @@ def apply(root):
     st = ttk.Style(root)
     st.theme_use("clam")
     for name in ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont", "TkCaptionFont"):
-        tkfont.nametofont(name).configure(family=fam, size=12)  # (sans règle « *Font » : elle écraserait les styles)
-    # listes déroulantes des combobox
+        tkfont.nametofont(name).configure(family=fam, size=12)  # (no '*Font' rule : it would override the styles)
+    # combobox drop-down lists
     root.option_add("*TCombobox*Listbox.background", FIELD)
     root.option_add("*TCombobox*Listbox.foreground", WHITE)
     root.option_add("*TCombobox*Listbox.selectBackground", ACCENT)

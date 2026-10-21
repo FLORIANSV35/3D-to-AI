@@ -1,8 +1,8 @@
-# sorties de build
+# build outputs
 build/
 dist/
 *.spec.bak
-# version générée au build
+# version generated at build time
 _version.py
 # Python
 __pycache__/
@@ -11,7 +11,7 @@ __pycache__/
 venv/
 # macOS
 .DS_Store
-# données de travail : jamais dans le dépôt
+# working data : never in the repository
 *.obj
 *.mtl
 *.dae

@@ -1,10 +1,10 @@
 #!/bin/bash
-# Numéro de version "V AA.MM.XX" :
-#   AA = année (2 chiffres), MM = mois, XX = nombre de commits faits durant ce mois (remis à zéro chaque début de mois),
-#   comptés jusqu'au commit REF inclus (défaut : HEAD). Le mois est celui du commit REF.
+# Version number "V YY.MM.XX" :
+#   YY = year (2 digits), MM = month, XX = number of commits made during that month (reset to zero at the start of each month),
+#   counted up to and including the commit REF (default : HEAD). The month is the one of the commit REF.
 # Usage : ./version.sh            -> V26.10.02
-#         ./version.sh --plain    -> 26.10.02 (sans le "V")
-#         ./version.sh <commit>   -> version d'un autre commit
+#         ./version.sh --plain    -> 26.10.02 (without the "V")
+#         ./version.sh <commit>   -> version of another commit
 PLAIN=0; REF=HEAD
 for a in "$@"; do case "$a" in --plain) PLAIN=1 ;; *) REF="$a" ;; esac; done
 cd "$(dirname "$0")"

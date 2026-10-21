@@ -1,15 +1,15 @@
 #!/bin/bash
-# Construit « dist/DRONE-TO-AI-V…-windows-x64.zip » (Windows). À lancer depuis Git Bash, ou par GitHub Actions.
-# Prérequis : Python 3 avec Tk (python.org), puis :  pip install -r requirements-build.txt
+# Builds 'dist/3D-to-AI-V…-windows-x64.zip' (Windows). Run it from Git Bash, or by GitHub Actions.
+# Prerequisite : Python 3 with Tk (python.org), then :  pip install -r requirements-build.txt
 set -euo pipefail
 cd "$(dirname "$0")"
 PY="${PYTHON:-python}"
 
-export APP_VERSION="$(./version.sh --plain)"        # V AA.MM.XX calculée depuis git
+export APP_VERSION="$(./version.sh --plain)"        # V YY.MM.XX computed from git
 printf 'VERSION = "V%s"\n' "$APP_VERSION" > _version.py
 echo "→ version V$APP_VERSION"
 
-echo "→ autotests (moteur, puis interface réelle + capture d'écran)"
+echo "→ self-tests (engine, then real interface + screenshot)"
 "$PY" app.py --selftest
 mkdir -p dist
 "$PY" app.py --smoketest --screenshot dist/screenshot-windows.png
@@ -17,15 +17,15 @@ mkdir -p dist
 [ -f assets/icon.ico ] || "$PY" assets/make_icon.py
 
 echo "→ PyInstaller"
-"$PY" -m PyInstaller --noconfirm --clean DRONE-TO-ADAMSON-AI.spec
+"$PY" -m PyInstaller --noconfirm --clean 3D-to-AI.spec
 
-echo "→ autotest de l'exécutable construit"
-"dist/DRONE TO AI/DRONE TO AI.exe" --selftest
+echo "→ self-test of the built executable"
+"dist/3D to AI/3D to AI.exe" --selftest
 
-# la recherche de mise à jour doit fonctionner depuis l'exécutable (certificats SSL embarqués) ; non bloquant : dépend du réseau
-"dist/DRONE TO AI/DRONE TO AI.exe" --check-update && echo "✔ recherche de mise à jour : OK depuis l'exécutable" \
-  || echo "⚠ recherche de mise à jour : code de sortie $? (réseau ou certificats ?)"
+# the update check must work from the executable (embedded SSL certificates) ; non-blocking : depends on the network
+"dist/3D to AI/3D to AI.exe" --check-update && echo "✔ update check : OK from the executable" \
+  || echo "⚠ update check : exit code $? (network or certificates ?)"
 
-ZIP="DRONE-TO-AI-V${APP_VERSION}-windows-x64"
-"$PY" -c "import shutil; shutil.make_archive('dist/$ZIP', 'zip', 'dist', 'DRONE TO AI')"
+ZIP="3D-to-AI-V${APP_VERSION}-windows-x64"
+"$PY" -c "import shutil; shutil.make_archive('dist/$ZIP', 'zip', 'dist', '3D to AI')"
 echo "✔ dist/$ZIP.zip"

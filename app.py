@@ -1,6 +1,6 @@
-"""DRONE TO AI — convertisseur OBJ -> DAE (Collada) avec aperçu 3D.
+"""3D to AI — OBJ / topographic survey -> DAE (Collada) converter with a 3D preview.
 
-Lancer :  python3 app.py
+Run :  python3 app.py
 """
 import os
 import queue
@@ -19,23 +19,23 @@ import topo
 import updater
 from preview3d import Preview
 
-try:  # glisser-déposer si tkinterdnd2 est installé (pip install tkinterdnd2)
+try:  # drag and drop if tkinterdnd2 is installed (pip install tkinterdnd2)
     from tkinterdnd2 import DND_FILES, TkinterDnD
     _Root = TkinterDnD.Tk
 except Exception:
     DND_FILES, _Root = None, tk.Tk
 
-try:  # généré au build par build_app.sh (V AA.MM.XX) ; absent quand on lance le code source
+try:  # generated at build time by build_app.sh (V YY.MM.XX) ; absent when running the source code
     from _version import VERSION
 except ImportError:
     VERSION = "dev"
 
 PREVIEW_POINTS = 250_000
-SIDE_W = 400  # largeur de la colonne de réglages
+SIDE_W = 400  # width of the settings column
 
 
 class Console(ttk.Label):
-    """Ligne de messages sous la vue 3D, façon console d'AI (« >Add Stage »)."""
+    """Message line under the 3D view, like the AI console ('>Add Stage')."""
 
     def __init__(self, master):
         super().__init__(master, style="Console.TLabel", anchor="w", justify="left")
@@ -49,11 +49,11 @@ class Console(ttk.Label):
 
 
 class App(_Root):
-    TABS = (("MODÈLE", "model"), ("PLACEMENT", "place"), ("RECADRAGE", "crop"), ("EXPORT", "export"))
+    TABS = (("MODEL", "model"), ("PLACEMENT", "place"), ("CROP", "crop"), ("EXPORT", "export"))
 
     def __init__(self):
         super().__init__()
-        self.title(f"DRONE TO AI {VERSION} — OBJ → DAE")
+        self.title(f"3D to AI {VERSION} — OBJ / terrain → DAE")
         self.fam = theme.apply(self)
         sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
         w, h = min(1280, int(sw * 0.92)), min(860, int(sh * 0.88))
@@ -62,10 +62,10 @@ class App(_Root):
         self.mesh = None
         self.src = None
         self._bounds = None
-        self.poly = None  # polygone de recadrage, points (h1, h2) sur les axes horizontaux de sortie
+        self.poly = None  # crop polygon, points (h1, h2) on the horizontal output axes
         self.q = queue.Queue()
         self._pending = None
-        self._rot_prev = (0.0, 0.0, 0.0)  # rotation précédente : sert à déduire la rotation ajoutée
+        self._rot_prev = (0.0, 0.0, 0.0)  # previous rotation : used to deduce the added rotation
         self._make_vars()
         self._build_ui()
         if DND_FILES:
@@ -74,16 +74,16 @@ class App(_Root):
         self.bind("<Escape>", lambda e: self.cancel_pick())
         self.bind("<Return>", lambda e: self.preview.finish_poly())
         self.bind("<BackSpace>", lambda e: self.preview.undo_poly())
-        # macOS : fichier déposé sur l'icône ou « Ouvrir avec » dans le Finder
+        # macOS : file dropped on the icon or 'Open With' in the Finder
         self.createcommand("::tk::mac::OpenDocument", self._open_documents)
         self.select_tab("model")
         self.after(100, self.poll)
-        if self.auto_update.get() and VERSION != "dev":  # pas pour le code source (« dev »)
+        if self.auto_update.get() and VERSION != "dev":  # not for the source code ('dev')
             self.after(2500, lambda: self.check_update(manual=False))
 
     # --- variables --------------------------------------------------------------
     def _make_vars(self):
-        self.unit = tk.StringVar(value="mètres (m)")
+        self.unit = tk.StringVar(value="meters (m)")
         self.scale = tk.StringVar(value="1.0")
         self.src_up = tk.StringVar(value="Y")
         self.dst_up = tk.StringVar(value="Z")
@@ -98,22 +98,22 @@ class App(_Root):
         self.show_axes = tk.BooleanVar(value=True)
         self.single = tk.BooleanVar(value=True)
         self.normals = tk.BooleanVar(value=True)
-        self.decim = tk.BooleanVar(value=True)  # limite de triangles activée par défaut
+        self.decim = tk.BooleanVar(value=True)  # triangle limit enabled by default
         self.target = tk.StringVar(value="1000")
         pr = settings.load()
         self.topo_place = tk.StringVar(value=pr.get("topo_place", ""))
         self.topo_size = tk.StringVar(value=str(pr.get("topo_size", 500)))
-        self.topo_source = tk.StringVar(value=pr.get("topo_source", topo.SOURCES[0]))
+        self.topo_source = tk.StringVar(value=pr.get("topo_source") if pr.get("topo_source") in topo.SOURCES else topo.SOURCES[0])
         self.topo_kind = tk.StringVar(value=topo.KINDS[0])
         self.topo_exag = tk.StringVar(value="1")
-        self.topo_poly = [tuple(p) for p in pr.get("topo_poly", [])] or None  # dernier polygone dessiné
-        self.topo_view = tuple(pr["topo_view"]) if pr.get("topo_view") else None  # (lat, lon, zoom) de la carte
-        self.topo_layer = pr.get("topo_layer")
+        self.topo_poly = [tuple(p) for p in pr.get("topo_poly", [])] or None  # last polygon drawn
+        self.topo_view = tuple(pr["topo_view"]) if pr.get("topo_view") else None  # (lat, lon, zoom) of the map
+        self.topo_layer = pr.get("topo_layer") if pr.get("topo_layer") in topo.TILE_LAYERS else None  # (names from older versions are dropped)
         self.topo_tex = tk.BooleanVar(value=bool(pr.get("topo_texture", True)))
         self.auto_update = tk.BooleanVar(value=bool(settings.load().get("check_updates", True)))
-        self._update = None  # dernière réponse de la recherche de mise à jour
+        self._update = None  # last answer of the update check
 
-    # --- petits constructeurs de widgets ------------------------------------------
+    # --- small widget builders ------------------------------------------
     def _spin(self, parent, var, width=8, lo=-100000, hi=100000, inc=1, cb=None):
         cb = cb or self.schedule
         e = ttk.Spinbox(parent, textvariable=var, from_=lo, to=hi, increment=inc, width=width, command=cb)
@@ -139,14 +139,14 @@ class App(_Root):
         outer = ttk.Frame(self, style="Window.TFrame", padding=8)
         outer.pack(fill="both", expand=True)
 
-        # barre d'onglets principale (grands onglets rectangulaires, actif en blanc)
+        # main tab bar (large rectangular tabs, active one in white)
         top = ttk.Frame(outer, style="Window.TFrame")
         top.pack(fill="x")
-        ttk.Label(top, text="DroneToAI", style="Logo.TLabel", width=13).pack(side="left", fill="y", padx=(0, 6))
+        ttk.Label(top, text="3DtoAI", style="Logo.TLabel", width=13).pack(side="left", fill="y", padx=(0, 6))
         tabs = ttk.Frame(top, style="Window.TFrame")
         tabs.pack(side="left", fill="x", expand=True)
         self._tabs_frame = tabs
-        self.upd_btn = ttk.Button(top, text="", style="Accent.TButton", command=self.open_update)  # affiché si nouveauté
+        self.upd_btn = ttk.Button(top, text="", style="Accent.TButton", command=self.open_update)  # shown when there is something new
         self.tab_btns = {}
         for i, (label, key) in enumerate(self.TABS):
             b = ttk.Button(tabs, text=label, style="Tab.TButton", command=lambda k=key: self.select_tab(k))
@@ -157,7 +157,7 @@ class App(_Root):
         body = ttk.Frame(outer, style="Window.TFrame")
         body.pack(fill="both", expand=True, pady=(8, 0))
 
-        # ---- colonne de gauche : titre, contenu défilant, pied de page fixe ----
+        # ---- left column : title, scrolling content, fixed footer ----
         left_edge = ttk.Frame(body, style="Edge.TFrame", padding=1)
         left_edge.pack(side="left", fill="y")
         left = ttk.Frame(left_edge)
@@ -165,7 +165,7 @@ class App(_Root):
         self.tab_title = tk.StringVar()
         ttk.Label(left, textvariable=self.tab_title, style="Title.TLabel", padding=(14, 10, 14, 4)).pack(
             side="top", anchor="w")
-        footer = ttk.Frame(left, padding=(14, 8, 14, 12))  # toujours visible, quelle que soit la hauteur
+        footer = ttk.Frame(left, padding=(14, 8, 14, 12))  # always visible, whatever the height
         footer.pack(side="bottom", fill="x")
         ttk.Separator(left).pack(side="bottom", fill="x")
 
@@ -189,20 +189,20 @@ class App(_Root):
         side.bind("<Configure>", fit)
         canvas.bind("<Configure>", fit)
 
-        # ---- zone de droite : barre d'outils, vue 3D, console ----
+        # ---- right area : toolbar, 3D view, console ----
         right_edge = ttk.Frame(body, style="Edge.TFrame", padding=1)
         right_edge.pack(side="right", fill="both", expand=True, padx=(8, 0))
         right = ttk.Frame(right_edge, style="View.TFrame")
         right.pack(fill="both", expand=True)
         bar = ttk.Frame(right, style="Bar.TFrame", padding=(8, 6))
         bar.pack(side="top", fill="x")
-        for text, view in (("Dessus", "top"), ("Face", "front"), ("Côté", "side"), ("3D", "iso")):
+        for text, view in (("Top", "top"), ("Front", "front"), ("Side", "side"), ("3D", "iso")):
             ttk.Button(bar, text=text, style="Tool.TButton", command=lambda v=view: self.preview.set_view(v)).pack(
                 side="left", padx=(0, 4))
-        ttk.Button(bar, text="Recentrer", style="Tool.TButton", command=self._recenter).pack(side="left", padx=(8, 4))
+        ttk.Button(bar, text="Recenter", style="Tool.TButton", command=self._recenter).pack(side="left", padx=(8, 4))
         ttk.Checkbutton(bar, text="Textures", style="Toolbutton", variable=self.show_tex,
                         command=self.schedule).pack(side="right")
-        ttk.Checkbutton(bar, text="Repère XYZ", style="Toolbutton", variable=self.show_axes,
+        ttk.Checkbutton(bar, text="XYZ frame", style="Toolbutton", variable=self.show_axes,
                         command=self._toggle_axes).pack(side="right", padx=(0, 4))
         cons = ttk.Frame(right, style="View.TFrame", padding=(10, 5, 10, 7))
         cons.pack(side="bottom", fill="x")
@@ -212,7 +212,7 @@ class App(_Root):
         self.preview = Preview(right, self.on_gizmo_moved, self._commit_rot, lambda t: self.lbl_pick.config(text=t))
         self.preview.pack(side="top", fill="both", expand=True)
 
-        # ---- contenu des onglets ----
+        # ---- tab contents ----
         self.pages = {k: ttk.Frame(side) for _, k in self.TABS}
         self._page_model(self.pages["model"])
         self._page_place(self.pages["place"])
@@ -220,10 +220,10 @@ class App(_Root):
         self._page_export(self.pages["export"])
         self._side = side
 
-        # ---- pied de page : limites du modèle, conversion, progression ----
+        # ---- footer : model limits, conversion, progress ----
         self.lbl_size = ttk.Label(footer, text="", style="Muted.TLabel", wraplength=SIDE_W - 30, justify="left")
         self.lbl_size.pack(anchor="w", pady=(0, 8))
-        self.btn = ttk.Button(footer, text="Convertir en .dae", style="Accent.TButton", command=self.convert,
+        self.btn = ttk.Button(footer, text="Convert to .dae", style="Accent.TButton", command=self.convert,
                               state="disabled")
         self.btn.pack(fill="x")
         self.bar = ttk.Progressbar(footer, maximum=1.0, style="Horizontal.TProgressbar")
@@ -241,7 +241,7 @@ class App(_Root):
 
     def select_tab(self, key):
         self.cancel_pick()
-        if getattr(self, "_tab", None) == key:  # re-sélectionner l'onglet actif vide la page (repaint de Tk)
+        if getattr(self, "_tab", None) == key:  # re-selecting the active tab empties the page (Tk repaint)
             return
         self._tab = key
         for k, page in self.pages.items():
@@ -249,7 +249,7 @@ class App(_Root):
         self.pages[key].pack(fill="x")
         for k, b in self.tab_btns.items():
             b.configure(style="TabOn.TButton" if k == key else "Tab.TButton")
-        self.tab_title.set({"model": "Modèle", "place": "Placement", "crop": "Recadrage", "export": "Export"}[key])
+        self.tab_title.set({"model": "Model", "place": "Placement", "crop": "Crop", "export": "Export"}[key])
         self._canvas.yview_moveto(0)
 
     def _recenter(self):
@@ -261,9 +261,9 @@ class App(_Root):
         self.preview.render()
 
     def _page_model(self, p):
-        self._section(p, "Relevé topographique (internet)", first=True)
-        ttk.Button(p, text="Dessiner la zone sur la carte…", style="Accent.TButton", command=self.open_map).pack(fill="x")
-        self._hint(p, "Carte satellite : tu traces un polygone, seul le relief à l'intérieur est récupéré.")
+        self._section(p, "Topographic survey (internet)", first=True)
+        ttk.Button(p, text="Draw the area on the map…", style="Accent.TButton", command=self.open_map).pack(fill="x")
+        self._hint(p, "Satellite map: you draw a polygon, only the terrain inside it is downloaded.")
         g = ttk.Frame(p)
         g.pack(fill="x", pady=(4, 0))
         g.columnconfigure(1, weight=1)
@@ -273,39 +273,39 @@ class App(_Root):
         self._combo(g, self.topo_kind, list(topo.KINDS), 30).grid(row=1, column=1, sticky="w", pady=3)
         ttk.Label(g, text="Relief ×").grid(row=2, column=0, sticky="w", pady=3, padx=(0, 10))
         ttk.Entry(g, textvariable=self.topo_exag, width=9).grid(row=2, column=1, sticky="w", pady=3)
-        ttk.Checkbutton(p, text="Plaquer l'image satellite (aperçu)", variable=self.topo_tex,
+        ttk.Checkbutton(p, text="Drape the satellite image (preview)", variable=self.topo_tex,
                         command=lambda: settings.save({**settings.load(), "topo_texture": self.topo_tex.get()})
                         ).pack(anchor="w", pady=(4, 0))
         self.lbl_topo = ttk.Label(p, text="", style="Muted.TLabel", wraplength=SIDE_W - 50)
         self.lbl_topo.pack(anchor="w", pady=(4, 0))
 
-        ttk.Label(p, text="Ou autour d'une adresse :", style="Muted.TLabel").pack(anchor="w", pady=(10, 2))
+        ttk.Label(p, text="Or around an address:", style="Muted.TLabel").pack(anchor="w", pady=(10, 2))
         e = ttk.Entry(p, textvariable=self.topo_place)
         e.pack(fill="x")
         e.bind("<Return>", lambda ev: self.fetch_topo())
         r = ttk.Frame(p)
         r.pack(fill="x", pady=(4, 0))
-        ttk.Label(r, text="Côté (m)").pack(side="left", padx=(0, 8))
+        ttk.Label(r, text="Side (m)").pack(side="left", padx=(0, 8))
         ttk.Entry(r, textvariable=self.topo_size, width=7).pack(side="left")
-        self.btn_topo = ttk.Button(r, text="Télécharger", style="Tool.TButton", command=self.fetch_topo)
+        self.btn_topo = ttk.Button(r, text="Download", style="Tool.TButton", command=self.fetch_topo)
         self.btn_topo.pack(side="left", padx=(10, 0))
-        self._hint(p, "Adresse, ville, lieu-dit ou « latitude, longitude ». Données : IGN Géoplateforme (Licence Ouverte, "
-                      "France, pas de 1 m), AWS Terrain Tiles (SRTM/NASADEM…, monde), OpenStreetMap. Le DAE est centré sur "
-                      "la zone, l'altitude du point le plus bas est ramenée à 0.")
+        self._hint(p, "Address, city, locality or 'latitude, longitude'. Data: IGN Géoplateforme (Open Licence, "
+                      "France, 1 m step), AWS Terrain Tiles (SRTM/NASADEM…, worldwide), OpenStreetMap. The DAE is centered on "
+                      "the area, the altitude of the lowest point is brought back to 0.")
 
-        self._section(p, "Ou un fichier OBJ")
-        ttk.Button(p, text="Ouvrir un .obj…", style="Tool.TButton", command=self.open_dialog).pack(fill="x")
-        self.lbl_file = ttk.Label(p, text="Aucun fichier", wraplength=SIDE_W - 50, foreground=theme.WHITE)
+        self._section(p, "Or an OBJ file")
+        ttk.Button(p, text="Open an .obj…", style="Tool.TButton", command=self.open_dialog).pack(fill="x")
+        self.lbl_file = ttk.Label(p, text="No file", wraplength=SIDE_W - 50, foreground=theme.WHITE)
         self.lbl_file.pack(anchor="w", pady=(8, 0))
         self.lbl_stats = ttk.Label(p, text="", style="Muted.TLabel", wraplength=SIDE_W - 50)
         self.lbl_stats.pack(anchor="w")
 
-        self._section(p, "Unités et axes")
+        self._section(p, "Units and axes")
         g = ttk.Frame(p)
         g.pack(fill="x")
         g.columnconfigure(1, weight=1)
-        rows = (("Unité du fichier", self._combo(g, self.unit, list(obj2dae.UNITS_TO_METERS), 16)),
-                ("Échelle ×", None),
+        rows = (("File unit", self._combo(g, self.unit, list(obj2dae.UNITS_TO_METERS), 16)),
+                ("Scale ×", None),
                 ("Axe vertical source", self._combo(g, self.src_up, ["Y", "Z"], 6)),
                 ("Axe vertical sortie", self._combo(g, self.dst_up, ["Y", "Z"], 6)))
         for r, (label, wdg) in enumerate(rows):
@@ -315,29 +315,29 @@ class App(_Root):
                 wdg.bind("<KeyRelease>", lambda e: self.schedule())
             wdg.grid(row=r, column=1, sticky="w", pady=3)
 
-        self._section(p, "Affichage")
-        ttk.Checkbutton(p, text="Aperçu avec textures / couleurs", variable=self.show_tex,
+        self._section(p, "Display")
+        ttk.Checkbutton(p, text="Preview with textures / colours", variable=self.show_tex,
                         command=self.schedule).pack(anchor="w", pady=2)
-        ttk.Checkbutton(p, text="Afficher le repère XYZ (origine d'AI)", variable=self.show_axes,
+        ttk.Checkbutton(p, text="Show the XYZ frame (AI origin)", variable=self.show_axes,
                         command=self._toggle_axes).pack(anchor="w", pady=2)
         self.lbl_tex = ttk.Label(p, text="", style="Muted.TLabel", wraplength=SIDE_W - 50)
         self.lbl_tex.pack(anchor="w", pady=(4, 0))
         self._section(p, "Version")
-        ttk.Label(p, text=f"DRONE TO AI {VERSION}", foreground=theme.WHITE).pack(anchor="w")
+        ttk.Label(p, text=f"3D to AI {VERSION}", foreground=theme.WHITE).pack(anchor="w")
         self.lbl_update = ttk.Label(p, text="", style="Muted.TLabel", wraplength=SIDE_W - 50)
         self.lbl_update.pack(anchor="w", pady=(2, 6))
         ur = ttk.Frame(p)
         ur.pack(fill="x")
-        ttk.Button(ur, text="Rechercher une mise à jour", command=lambda: self.check_update(manual=True)).pack(side="left")
-        ttk.Checkbutton(p, text="Vérifier au démarrage", variable=self.auto_update,
+        ttk.Button(ur, text="Check for updates", command=lambda: self.check_update(manual=True)).pack(side="left")
+        ttk.Checkbutton(p, text="Check at startup", variable=self.auto_update,
                         command=self._save_prefs).pack(anchor="w", pady=(6, 0))
-        self._hint(p, "Vue 3D : glisser = tourner · clic droit + glisser (ou Maj + glisser) = déplacer · molette = zoom "
-                      "vers le curseur · double-clic = recentrer. "
-                      "Anneaux du repère = rotation autour de l'axe. Le repère XYZ est l'origine d'AI (Z bleu = Top, Y vert = Cours, X rouge = Nez) : attrape son centre ou une flèche "
-                      "et glisse pour déplacer le modèle.")
+        self._hint(p, "3D view: drag = rotate · right-click + drag (or Shift + drag) = pan · wheel = zoom "
+                      "towards the cursor · double-click = recenter. "
+                      "Frame rings = rotation around the axis. The XYZ frame is the AI origin (blue Z = Top, green Y = Court, red X = Nose): grab its centre or an arrow "
+                      "and drag to move the model.")
 
     def _xyz_row(self, p, vars_, width=9, header=True, cb=None):
-        """Ligne de trois champs X / Y / Z avec en-têtes gris façon tableau d'AI."""
+        """Row of three X / Y / Z fields with grey headers like an AI table."""
         g = ttk.Frame(p)
         g.pack(fill="x")
         for c, name in enumerate("XYZ"):
@@ -349,7 +349,7 @@ class App(_Root):
         return g
 
     def _page_place(self, p):
-        self._section(p, "Rotation par pas de 90° (autour du repère XYZ)", first=True)
+        self._section(p, "Rotation in 90° steps (around the XYZ frame)", first=True)
         g = ttk.Frame(p)
         g.pack(fill="x")
         g.columnconfigure((1, 2), weight=1, uniform="b")
@@ -358,33 +358,33 @@ class App(_Root):
             ttk.Button(g, text="−90°", command=lambda i=i: self.rot90(i, -90)).grid(row=i, column=1, sticky="ew", padx=(2, 0), pady=1)
             ttk.Button(g, text="+90°", command=lambda i=i: self.rot90(i, 90)).grid(row=i, column=2, sticky="ew", padx=(2, 0), pady=1)
 
-        self._hint(p, "Le modèle reste fixe à l'écran : c'est le repère XYZ (l'origine d'AI) qui pivote. Boutons ±90°, ou attrape "
-                      "un anneau (rouge = X, vert = Y, bleu = Z) du repère dans la vue 3D et glisse : aimant tous les 15°.")
+        self._hint(p, "The model stays fixed on screen: it is the XYZ frame (the AI origin) that pivots. ±90° buttons, or grab "
+                      "a ring (red = X, green = Y, blue = Z) of the frame in the 3D view and drag: magnet every 15°.")
 
-        self._section(p, "Réglage fin (degrés)")
+        self._section(p, "Fine adjustment (degrees)")
         self._xyz_row(p, self.rot, cb=self.on_rot_change)
         b = ttk.Frame(p)
         b.pack(fill="x", pady=(8, 0))
-        for c, (text, cmd) in enumerate((("Sol à niveau", self.do_level), ("Aligner sur X", self.do_yaw),
+        for c, (text, cmd) in enumerate((("Level ground", self.do_level), ("Align on X", self.do_yaw),
                                           ("Rot. = 0", lambda: self.set_rot(0, 0, 0)))):
             b.columnconfigure(c, weight=1, uniform="rb")
             ttk.Button(b, text=text, command=cmd).grid(row=0, column=c, sticky="ew", padx=(0 if c == 0 else 3, 0))
 
-        self._section(p, "Position (mètres)")
+        self._section(p, "Position (meters)")
         self._xyz_row(p, self.off)
-        ttk.Checkbutton(p, text="Centrer le modèle en X/Y sur l'origine", variable=self.center,
+        ttk.Checkbutton(p, text="Center the model in X/Y on the origin", variable=self.center,
                         command=self.schedule).pack(anchor="w", pady=(8, 2))
-        ttk.Checkbutton(p, text="Poser le point le plus bas à Z = 0", variable=self.floor,
+        ttk.Checkbutton(p, text="Put the lowest point at Z = 0", variable=self.floor,
                         command=self.schedule).pack(anchor="w", pady=2)
         r = ttk.Frame(p)
         r.pack(fill="x", pady=(8, 0))
-        ttk.Button(r, text="Origine = point cliqué", command=self.pick_origin).pack(side="left")
-        ttk.Checkbutton(r, text="avec Z", variable=self.pick_z).pack(side="left", padx=10)
+        ttk.Button(r, text="Origin = clicked point", command=self.pick_origin).pack(side="left")
+        ttk.Checkbutton(r, text="with Z", variable=self.pick_z).pack(side="left", padx=10)
 
     def _page_crop(self, p):
-        ttk.Checkbutton(p, text="Recadrer : ne garder que cette zone", variable=self.crop_on,
+        ttk.Checkbutton(p, text="Crop: keep only this area", variable=self.crop_on,
                         command=self.on_crop_toggle).pack(anchor="w")
-        self._section(p, "Zone (mètres)")
+        self._section(p, "Area (meters)")
         g = ttk.Frame(p)
         g.pack(fill="x")
         for c, name in enumerate(("", "Min", "Max")):
@@ -395,46 +395,46 @@ class App(_Root):
             ttk.Label(g, text=axis, style="Header.TLabel", width=3).grid(row=r, column=0, sticky="nsew", pady=1)
             for c, kind in enumerate(("min", "max"), start=1):
                 self._spin(g, self.crop[(axis, kind)], 9).grid(row=r, column=c, sticky="ew", padx=(2, 0), pady=1)
-        self._section(p, "Outils")
+        self._section(p, "Tools")
         b = ttk.Frame(p)
         b.pack(fill="x")
         b.columnconfigure((0, 1), weight=1, uniform="cb")
-        for i, (text, cmd) in enumerate((("Zone = tout le modèle", self.crop_reset),
-                                          ("Centrer sur un clic", self.pick_crop_center),
-                                          ("Tracer un polygone", self.start_polygon),
-                                          ("Effacer le polygone", self.clear_poly))):
+        for i, (text, cmd) in enumerate((("Area = whole model", self.crop_reset),
+                                          ("Center on a click", self.pick_crop_center),
+                                          ("Draw a polygon", self.start_polygon),
+                                          ("Clear the polygon", self.clear_poly))):
             ttk.Button(b, text=text, command=cmd).grid(row=i // 2, column=i % 2, sticky="ew", padx=(0 if i % 2 == 0 else 3, 0),
                                                        pady=(0 if i < 2 else 3, 0))
-        self._hint(p, "Le polygone se trace en vue de dessus : clic = point, clic sur le 1er point (vert) ou Entrée = "
-                      "fermer, Retour arrière = annuler le dernier, Échap = abandonner. La partie exclue est grisée ; "
-                      "la zone gardée est dessinée en orange.")
+        self._hint(p, "The polygon is drawn in top view: click = point, click on the 1st point (green) or Enter = "
+                      "close, Backspace = undo the last one, Esc = give up. The excluded part is greyed ; "
+                      "the kept area is drawn in orange.")
 
     def _page_export(self, p):
-        self._section(p, "Compatibilité AI", first=True)
-        ttk.Checkbutton(p, text="Un seul groupe de triangles (requis par AI)", variable=self.single).pack(anchor="w", pady=2)
-        ttk.Checkbutton(p, text="Inclure les normales", variable=self.normals).pack(anchor="w", pady=2)
+        self._section(p, "AI compatibility", first=True)
+        ttk.Checkbutton(p, text="A single triangle group (required by AI)", variable=self.single).pack(anchor="w", pady=2)
+        ttk.Checkbutton(p, text="Include the normals", variable=self.normals).pack(anchor="w", pady=2)
         self._section(p, "Simplification")
-        ttk.Checkbutton(p, text="Réduire le nombre de triangles", variable=self.decim).pack(anchor="w", pady=2)
+        ttk.Checkbutton(p, text="Reduce the number of triangles", variable=self.decim).pack(anchor="w", pady=2)
         r = ttk.Frame(p)
         r.pack(fill="x", pady=(4, 0))
-        ttk.Label(r, text="Cible").pack(side="left", padx=(24, 8))
+        ttk.Label(r, text="Target").pack(side="left", padx=(24, 8))
         ttk.Entry(r, textvariable=self.target, width=11).pack(side="left")
-        self._hint(p, "AI lit un seul groupe de triangles et peut manquer de mémoire sur de très gros maillages : "
-                      "réduis-les (1 000 par défaut : monte la cible si le résultat est trop grossier).")
+        self._hint(p, "AI reads a single triangle group and can run out of memory on very large meshes: "
+                      "reduce them (1,000 by default: raise the target if the result is too coarse).")
 
-    # --- mises à jour ----------------------------------------------------------
+    # --- updates ----------------------------------------------------------
     def _save_prefs(self):
         settings.save({**settings.load(), "check_updates": bool(self.auto_update.get())})
 
     def check_update(self, manual=False):
-        """Interroge GitHub en arrière-plan (l'interface ne se fige jamais)."""
+        """Query GitHub in the background (the interface never freezes)."""
         if manual:
-            self.lbl_update.config(text="Recherche en cours…")
+            self.lbl_update.config(text="Checking…")
 
         def work():
             try:
                 self.q.put(("update", updater.fetch_latest(VERSION), manual))
-            except Exception as e:  # noqa: BLE001  (pas de réseau, GitHub injoignable, limite de requêtes…)
+            except Exception as e:  # noqa: BLE001  (no network, GitHub unreachable, rate limit…)
                 self.q.put(("update_err", str(e), manual))
 
         threading.Thread(target=work, daemon=True).start()
@@ -443,29 +443,29 @@ class App(_Root):
         self._update = info
         tag = info["tag"]
         if info["newer"]:
-            self.lbl_update.config(text=f"Nouvelle version disponible : {tag} (publiée le {info['date']}).",
+            self.lbl_update.config(text=f"New version available: {tag} (published {info['date']}).",
                                    foreground=theme.BROWN)
-            self.upd_btn.config(text=f"Mise à jour {tag}")
+            self.upd_btn.config(text=f"Update {tag}")
             self.upd_btn.pack(side="right", padx=(6, 0), before=self._tabs_frame)
             if manual and messagebox.askyesno(
-                    "Mise à jour disponible",
-                    f"{tag} est disponible (version actuelle : {VERSION}).\n\n{info['notes'][:600]}\n\n"
-                    "Ouvrir la page de téléchargement ?"):
+                    "Update available",
+                    f"{tag} is available (current version: {VERSION}).\n\n{info['notes'][:600]}\n\n"
+                    "Open the download page?"):
                 self.open_update()
             return
         self.upd_btn.pack_forget()
         if VERSION == "dev":
-            self.lbl_update.config(text=f"Version de développement (code source). Dernière version publiée : {tag}.",
+            self.lbl_update.config(text=f"Development version (source code). Latest published version: {tag}.",
                                    foreground=theme.MUTED)
         else:
-            self.lbl_update.config(text=f"Vous avez la dernière version ({tag}).", foreground=theme.MUTED)
+            self.lbl_update.config(text=f"You have the latest version ({tag}).", foreground=theme.MUTED)
         if manual:
-            messagebox.showinfo("Mise à jour", self.lbl_update.cget("text"))
+            messagebox.showinfo("Update", self.lbl_update.cget("text"))
 
     def _on_update_error(self, err, manual):
-        if manual:  # au démarrage, un échec reste silencieux
-            self.lbl_update.config(text="Impossible de joindre GitHub (pas de connexion ?).", foreground=theme.ERROR)
-            messagebox.showwarning("Mise à jour", f"Impossible de vérifier la dernière version.\n\n{err}")
+        if manual:  # at startup, a failure stays silent
+            self.lbl_update.config(text="Could not reach GitHub (no connection?).", foreground=theme.ERROR)
+            messagebox.showwarning("Update", f"Could not check the latest version.\n\n{err}")
 
     def open_update(self):
         if self._update:
@@ -482,9 +482,9 @@ class App(_Root):
         for c in w.winfo_children():
             yield from App._walk(c)
 
-    # --- chargement -------------------------------------------------------
+    # --- loading -------------------------------------------------------
     def open_dialog(self):
-        p = filedialog.askopenfilename(title="Choisir un OBJ", filetypes=[("Wavefront OBJ", "*.obj")])
+        p = filedialog.askopenfilename(title="Choose an OBJ", filetypes=[("Wavefront OBJ", "*.obj")])
         if p:
             self.load(p)
 
@@ -502,12 +502,12 @@ class App(_Root):
         self.fetch_topo(poly, label)
 
     def fetch_topo(self, poly=None, label=None):
-        """Télécharge le relief : d'un polygone dessiné sur la carte, sinon d'un carré autour de l'adresse saisie."""
+        """Download the terrain : of a polygon drawn on the map, otherwise of a square around the typed address."""
         try:
             size = float(self.topo_size.get().replace(",", "."))
             exag = float(self.topo_exag.get().replace(",", "."))
         except ValueError:
-            messagebox.showwarning("Relevé topographique", "Taille de zone ou facteur de relief invalide.")
+            messagebox.showwarning("Topographic survey", "Invalid area size or relief factor.")
             return
         place, source, kind = self.topo_place.get().strip(), self.topo_source.get(), self.topo_kind.get()
         prefs = settings.load()
@@ -519,15 +519,15 @@ class App(_Root):
         self.mesh = None
         self.btn.config(state="disabled")
         self.btn_topo.config(state="disabled")
-        self.lbl_file.config(text=label or place or "Relevé topographique")
-        self.lbl_stats.config(text="Téléchargement en cours…")
+        self.lbl_file.config(text=label or place or "Topographic survey")
+        self.lbl_stats.config(text="Downloading…")
         self.lbl_topo.config(text="")
 
         def work():
             try:
                 prog = lambda f, t: self.q.put(("prog", f, t))  # noqa: E731
                 if poly:
-                    m, info = topo.build_polygon(poly, label or "Zone dessinée", source, kind, 0.0, exag, prog, tex)
+                    m, info = topo.build_polygon(poly, label or "Drawn area", source, kind, 0.0, exag, prog, tex)
                 else:
                     m, info = topo.build(place, size, source, kind, 0.0, exag, prog, tex)
                 self.q.put(("loaded", m, "Z", info))
@@ -538,13 +538,13 @@ class App(_Root):
 
     def load(self, path):
         if not path.lower().endswith(".obj"):
-            messagebox.showwarning("Fichier", "Ce n'est pas un fichier .obj")
+            messagebox.showwarning("File", "This is not an .obj file")
             return
         self.src = path
         self.mesh = None
         self.btn.config(state="disabled")
         self.lbl_file.config(text=os.path.basename(path))
-        self.lbl_stats.config(text="Lecture en cours…")
+        self.lbl_stats.config(text="Reading…")
 
         def work():
             try:
@@ -582,31 +582,31 @@ class App(_Root):
         self.on_rot_change()
 
     def _rot_values(self):
-        """Angles des champs de rotation, ou None si un champ est vide / incomplet (frappe en cours)."""
+        """Angles of the rotation fields, or None if a field is empty / incomplete (typing in progress)."""
         try:
             return tuple(float(v.get().replace(",", ".")) for v in self.rot)
         except ValueError:
             return None
 
     def on_rot_change(self):
-        """La rotation se fait autour du repère XYZ (origine d'AI) : le modèle tourne comme un solide autour de
-        cette origine. On applique donc la rotation ajoutée aussi à la position (offset), et à la zone de recadrage
-        quand c'est possible, pour que le point posé sur l'origine y reste."""
+        """The rotation is made around the XYZ frame (AI origin) : the model turns like a solid around
+        that origin. The added rotation is therefore also applied to the position (offset), and to the crop zone
+        when possible, so that the point placed on the origin stays there."""
         new = self._rot_values()
         if new is None:
             return
-        D = obj2dae.rotation_matrix(*new) @ obj2dae.rotation_matrix(*self._rot_prev).T  # rotation ajoutée (Z vertical)
+        D = obj2dae.rotation_matrix(*new) @ obj2dae.rotation_matrix(*self._rot_prev).T  # added rotation (Z-up)
         self._rot_prev = new
         if not np.allclose(D, np.eye(3), atol=1e-12):
             P = np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]], float) if self.dst_up.get() == "Y" else np.eye(3)
-            Do = P @ D @ P.T  # même rotation dans le repère de sortie
+            Do = P @ D @ P.T  # same rotation in the output frame
             for var, x in zip(self.off, Do @ np.asarray(self.get_off())):
                 var.set(self._fmt(x, 3))
             self._follow_rotation(Do)
         self.schedule()
 
     def _fit_crop_to_poly(self):
-        """La boîte de recadrage prend l'emprise horizontale du polygone."""
+        """The crop box takes the horizontal extent of the polygon."""
         for k, ax_i in enumerate(self._hor()):
             vals = [p[k] for p in self.poly]
             ax = "XYZ"[ax_i]
@@ -614,8 +614,8 @@ class App(_Root):
             self.crop[(ax, "max")].set(f"{np.ceil(max(vals) * 100) / 100:g}")
 
     def _follow_rotation(self, Do):
-        """La zone de recadrage suit le modèle pour une rotation autour de la verticale (angle quelconque pour un
-        polygone, multiple de 90° pour la boîte). Pour une autre rotation, elle reste en place."""
+        """The crop zone follows the model for a rotation around the vertical (any angle for a
+        polygon, multiple of 90° for the box). For another rotation, it stays in place."""
         up = 2 if self.dst_up.get() == "Z" else 1
         if abs(Do[up, up] - 1) > 1e-9:
             return
@@ -637,11 +637,11 @@ class App(_Root):
                 self.crop[(ax, "max")].set(self._fmt(corners[:, k].max()))
 
     def rot90(self, axis, deg):
-        """Pas de rotation autour du repère XYZ : le modèle pivote à l'écran autour de l'axe, puis on valide."""
+        """Rotation step around the XYZ frame : the frame pivots on screen around the axis, then it is committed."""
         self.preview.animate_rotation(axis, deg, self._commit_rot)
 
     def _commit_rot(self, axis, deg):
-        """Valide une rotation faite à l'écran (anneau ou bouton) : ajoutée autour de l'axe `axis` du repère."""
+        """Commit a rotation made on screen (ring or button) : added around the axis `axis` of the frame."""
         self.set_rot(*obj2dae.rotate_world(self.get_rot(), axis, deg))
 
     def do_level(self):
@@ -659,25 +659,25 @@ class App(_Root):
         self.set_rot(rx, ry, obj2dae.auto_yaw(z))
 
     def on_gizmo_moved(self, d):
-        """Le repère a été glissé de d (m, repère Z vertical) : le modèle bouge de -d par rapport à lui."""
+        """The frame was dragged by d (m, Z-up frame) : the model moves by -d relative to it."""
         mv = -np.asarray(d, dtype=float)
-        if self.dst_up.get() == "Y":  # repère Z vertical de l'aperçu -> repère de sortie
+        if self.dst_up.get() == "Y":  # Z-up frame of the preview -> output frame
             mv = np.array([mv[0], mv[2], -mv[1]])
         for var, x in zip(self.off, np.asarray(self.get_off()) + mv):
             var.set(self._fmt(x, 3))
         if self.poly:
             i1, i2 = self._hor()
             self.poly = [(p[0] + mv[i1], p[1] + mv[i2]) for p in self.poly]
-        if self.crop_on.get() and self.get_crop() is not None:  # la zone suit le modèle
+        if self.crop_on.get() and self.get_crop() is not None:  # the zone follows the model
             for i, ax in enumerate("XYZ"):
                 for kind in ("min", "max"):
                     var = self.crop[(ax, kind)]
                     var.set(f"{float(var.get().replace(',', '.')) + mv[i]:.2f}")
         self.schedule()
 
-    # --- recadrage / placement par clic ------------------------------------
+    # --- crop / placement by click ------------------------------------
     def get_crop(self):
-        """((xmin,ymin,zmin),(xmax,ymax,zmax)) en repère de sortie, ou None si désactivé / invalide."""
+        """((xmin,ymin,zmin),(xmax,ymax,zmax)) in the output frame, or None if disabled / invalid."""
         if not self.crop_on.get():
             return None
         try:
@@ -691,7 +691,7 @@ class App(_Root):
         return lo, hi
 
     def crop_reset(self):
-        """Zone = limites actuelles du modèle placé (efface aussi le polygone)."""
+        """Area = current limits of the placed model (also clears the polygon)."""
         if self._bounds is None:
             return
         self.poly = None
@@ -707,7 +707,7 @@ class App(_Root):
         self.schedule()
 
     def _to_out(self, p):
-        """Point du repère de l'aperçu (Z vertical) -> repère de sortie."""
+        """Point of the preview frame (Z-up) -> output frame."""
         p = np.asarray(p, dtype=float)
         return np.array([p[0], p[2], -p[1]]) if self.dst_up.get() == "Y" else p
 
@@ -716,9 +716,9 @@ class App(_Root):
         self.preview.cancel_poly()
         self.lbl_pick.config(text="")
 
-    # --- polygone de recadrage ----------------------------------------------
+    # --- crop polygon ----------------------------------------------
     def _hor(self):
-        """Indices des axes horizontaux du repère de sortie."""
+        """Indices of the horizontal axes of the output frame."""
         return (0, 1) if self.dst_up.get() == "Z" else (0, 2)
 
     def _poly_to_zup(self):
@@ -734,17 +734,17 @@ class App(_Root):
             self.crop_on.set(True)
             if all(float(v.get() or 0) == 0 for v in self.crop.values()):
                 self.crop_reset()
-        self.lbl_pick.config(text="Vue de dessus : clique pour poser les points · clique le 1er point (vert) ou Entrée "
-                                  "pour fermer · Retour arrière = annuler le dernier · Échap = abandonner · "
-                                  "glisser = déplacer la vue · molette = zoom")
+        self.lbl_pick.config(text="Top view: click to place the points · click the 1st point (green) or press Enter "
+                                  "to close · Backspace = undo the last · Esc = give up · "
+                                  "drag = pan the view · wheel = zoom")
         self.preview.start_polygon(self._on_poly_done, lambda t: self.lbl_pick.config(text=t))
 
     def _on_poly_done(self, pts):
-        """pts : points (X, Y) en repère Z vertical -> repère de sortie ; la boîte prend l'emprise du polygone."""
+        """pts : points (X, Y) in Z-up frame -> output frame ; the box takes the extent of the polygon."""
         self.poly = [(x, y) if self.dst_up.get() == "Z" else (x, -y) for x, y in pts]
         self._fit_crop_to_poly()
         self.crop_on.set(True)
-        self.lbl_pick.config(text=f"Polygone de {len(self.poly)} points enregistré.")
+        self.lbl_pick.config(text=f"Polygon of {len(self.poly)} points saved.")
         self.schedule()
 
     def clear_poly(self):
@@ -753,36 +753,36 @@ class App(_Root):
         self.schedule()
 
     def pick_origin(self):
-        self.lbl_pick.config(text="Clique un point du modèle pour en faire l'origine (Échap = annuler)")
+        self.lbl_pick.config(text="Click a point of the model to make it the origin (Esc = cancel)")
         self.preview.start_pick(self._on_pick_origin)
 
     def _on_pick_origin(self, p):
         self.lbl_pick.config(text="")
         if p is None:
-            self.lbl_pick.config(text="Aucun point du modèle à cet endroit.")
+            self.lbl_pick.config(text="No model point at this place.")
             return
         p = np.array(p, dtype=float)
         if not self.pick_z.get():
-            p[2] = 0.0  # on garde la hauteur actuelle
-        self.on_gizmo_moved(p)  # le repère va sur le point : le modèle bouge de -p
+            p[2] = 0.0  # keep the current height
+        self.on_gizmo_moved(p)  # the frame goes to the point : the model moves by -p
 
     def pick_crop_center(self):
         if self.get_crop() is None and self._bounds is not None:
             self.crop_on.set(True)
             self.crop_reset()
-        self.lbl_pick.config(text="Clique le centre de la zone à garder (Échap = annuler)")
+        self.lbl_pick.config(text="Click the centre of the area to keep (Esc = cancel)")
         self.preview.start_pick(self._on_pick_crop)
 
     def _on_pick_crop(self, p):
         self.lbl_pick.config(text="")
         if p is None:
-            self.lbl_pick.config(text="Aucun point du modèle à cet endroit.")
+            self.lbl_pick.config(text="No model point at this place.")
             return
         lo, hi = self.get_crop()
         c = self._to_out(p)
         for i, ax in enumerate("XYZ"):
             if ax == "Z":
-                continue  # la hauteur de la zone reste inchangée
+                continue  # the height of the zone stays unchanged
             half = (hi[i] - lo[i]) / 2
             self.crop[(ax, "min")].set(f"{c[i] - half:.2f}")
             self.crop[(ax, "max")].set(f"{c[i] + half:.2f}")
@@ -793,15 +793,15 @@ class App(_Root):
         wanted = [p for p in (m.mat_tex or {}).values()]
         missing = [os.path.basename(p) for p in wanted if obj2dae.load_texture(p) is None]
         if n_tex:
-            return f"Textures affichées : {n_tex} image(s)" + (f" · manquantes : {', '.join(missing)}" if missing else "")
+            return f"Textures shown: {n_tex} image(s)" + (f" · missing: {', '.join(missing)}" if missing else "")
         if missing:
-            return "Image(s) introuvable(s) à côté de l'OBJ : " + ", ".join(missing)
+            return "Image(s) not found next to the OBJ: " + ", ".join(missing)
         if not np.isnan(cols[:, 0]).all():
-            return "Couleurs des matériaux (.mtl) affichées"
-        return "Pas de texture ni de couleur dans cet OBJ (.mtl absent ?) — couleurs = hauteur"
+            return "Material colours (.mtl) shown"
+        return "No texture or colour in this OBJ (.mtl missing?) — colours = height"
 
     def schedule(self, keep_view=True):
-        """Recalcule aperçu + dimensions après une courte pause (évite de recalculer à chaque frappe)."""
+        """Recompute preview + dimensions after a short pause (avoids recomputing at every keystroke)."""
         if self._pending is not None:
             self.after_cancel(self._pending)
         self._pending = self.after(120, lambda: self.refresh(keep_view))
@@ -813,7 +813,7 @@ class App(_Root):
         try:
             k = self.get_scale()
         except ValueError:
-            self.lbl_size.config(text="Facteur d'échelle invalide")
+            self.lbl_size.config(text="Invalid scale factor")
             return
         dst = self.dst_up.get()
         v = obj2dae.place(self.mesh.verts, k, self.src_up.get(), dst, self.get_rot(),
@@ -821,10 +821,10 @@ class App(_Root):
         lo, hi = v.min(axis=0), v.max(axis=0)
         self._bounds = (lo, hi)
         self.lbl_size.config(text=(
-            "Position en sortie (m), repère %s-up :\n"
+            "Output position (m), %s-up frame:\n"
             "  X : %.2f → %.2f   (%.1f)\n  Y : %.2f → %.2f   (%.1f)\n  Z : %.2f → %.2f   (%.1f)"
             % (dst, lo[0], hi[0], hi[0] - lo[0], lo[1], hi[1], hi[1] - lo[1], lo[2], hi[2], hi[2] - lo[2])))
-        zup = obj2dae.to_zup(v, "Y") if dst == "Y" else v  # l'aperçu est toujours en Z vertical
+        zup = obj2dae.to_zup(v, "Y") if dst == "Y" else v  # the preview is always Z-up
         pts, nrm, idx, bary = obj2dae.sample_surface(zup, self.mesh.tris, PREVIEW_POINTS, with_bary=True)
         cols = None
         if self.show_tex.get():
@@ -834,8 +834,8 @@ class App(_Root):
             self.lbl_tex.config(text="")
         box = self.get_crop()
         if box is not None:
-            box = box[:2]  # (lo, hi) ; le polygone éventuel est passé à part
-            if dst == "Y":  # boîte en repère de sortie -> repère de l'aperçu (Z vertical)
+            box = box[:2]  # (lo, hi) ; the polygon, if any, is passed separately
+            if dst == "Y":  # box in output frame -> preview frame (Z-up)
                 (x0, y0, z0), (x1, y1, z1) = box
                 box = ((x0, -z1, y0), (x1, -z0, y1))
         poly = self._poly_to_zup() if box is not None else None
@@ -848,12 +848,12 @@ class App(_Root):
             k = self.get_scale()
             tgt = int(self.target.get()) if self.decim.get() else None
         except ValueError:
-            messagebox.showerror("Paramètres", "Facteur d'échelle ou cible invalide.")
+            messagebox.showerror("Settings", "Invalid scale factor or target.")
             return
         dst = filedialog.asksaveasfilename(
-            title="Enregistrer le DAE", defaultextension=".dae",
+            title="Save the DAE", defaultextension=".dae",
             initialfile=(os.path.splitext(os.path.basename(self.src))[0] if self.src
-                         else (self.lbl_file.cget("text") or "releve").strip().replace("/", "-") or "releve") + ".dae",
+                         else (self.lbl_file.cget("text") or "survey").strip().replace("/", "-") or "survey") + ".dae",
             filetypes=[("Collada", "*.dae")])
         if not dst:
             return
@@ -884,22 +884,22 @@ class App(_Root):
                 elif kind == "loaded":
                     self.mesh = msg[1]
                     nt = len(self.mesh.tris)
-                    self.lbl_stats.config(text=f"{len(self.mesh.verts):,} sommets · {nt:,} triangles".replace(",", " "))
+                    self.lbl_stats.config(text=f"{len(self.mesh.verts):,} vertices · {nt:,} triangles")
                     self.bar["value"] = 0
                     self.lbl_status.config(text="")
                     self.btn.config(state="normal")
                     self.btn_topo.config(state="normal")
-                    if len(msg) > 2:  # relevé topographique : mètres, Z vertical, centré sur le lieu
+                    if len(msg) > 2:  # topographic survey : meters, Z-up, centered on the place
                         info = msg[3]
                         self.src_up.set(msg[2])
-                        self.unit.set("mètres (m)")
+                        self.unit.set("meters (m)")
                         self.scale.set("1.0")
                         self.floor.set(True)
                         self.lbl_file.config(text=info["label"].split(",")[0])
-                        self.lbl_topo.config(text="%s · pas ≈ %.1f m · altitude %.0f → %.0f m · emprise %.0f × %.0f m · %.2f ha" % (
+                        self.lbl_topo.config(text="%s · step ≈ %.1f m · altitude %.0f → %.0f m · extent %.0f × %.0f m · %.2f ha" % (
                             info["source"], info["step"], info["zmin"], info["zmax"], *info["size"], info["area"] / 1e4)
-                            + (f"\nImage satellite : {info['texture']}" if info.get("texture") else "")
-                            + (f"\nImage satellite indisponible : {info['texture_error']}" if info.get("texture_error") else ""))
+                            + (f"\nSatellite image: {info['texture']}" if info.get("texture") else "")
+                            + (f"\nSatellite image unavailable: {info['texture_error']}" if info.get("texture_error") else ""))
                     else:
                         self.src_up.set(obj2dae.guess_up_axis(self.mesh.verts))
                     self.refresh(keep_view=False)
@@ -907,11 +907,11 @@ class App(_Root):
                     st = msg[2]
                     self.bar["value"] = 1
                     self.btn.config(state="normal")
-                    self.lbl_status.config(text="Enregistré ✔")
+                    self.lbl_status.config(text="Saved ✔")
                     messagebox.showinfo(
-                        "Conversion terminée",
-                        f"{msg[1]}\n\nTriangles : {st['tris_in']:,} → {st['tris_out']:,}\n"
-                        "Dimensions : %.1f × %.1f × %.1f m" % tuple(st["size_m"]))
+                        "Conversion finished",
+                        f"{msg[1]}\n\nTriangles: {st['tris_in']:,} → {st['tris_out']:,}\n"
+                        "Dimensions: %.1f × %.1f × %.1f m" % tuple(st["size_m"]))
                 elif kind == "update":
                     self._on_update_result(msg[1], msg[2])
                 elif kind == "update_err":
@@ -919,16 +919,16 @@ class App(_Root):
                 elif kind == "error":
                     self.btn_topo.config(state="normal")
                     self.btn.config(state="normal" if self.mesh else "disabled")
-                    self.lbl_status.config(text="Erreur")
+                    self.lbl_status.config(text="Error")
                     self.lbl_stats.config(text="")
-                    messagebox.showerror("Erreur", msg[1])
+                    messagebox.showerror("Error", msg[1])
         except queue.Empty:
             pass
         self.after(100, self.poll)
 
 
 def _sample_obj(folder, n=30):
-    """OBJ synthétique (nappe ondulée) pour les autotests."""
+    """Synthetic OBJ (wavy sheet) for the self-tests."""
     path = os.path.join(folder, "t.obj")
     with open(path, "w") as f:
         for i in range(n):
@@ -942,7 +942,7 @@ def _sample_obj(folder, n=30):
 
 
 def selftest():
-    """Vérifie, sans fenêtre, le moteur de conversion (utile pour valider un build)."""
+    """Check the conversion engine without a window (useful to validate a build)."""
     import tempfile
     import xml.etree.ElementTree as ET
 
@@ -954,18 +954,18 @@ def selftest():
         ns = {"c": "http://www.collada.org/2005/11/COLLADASchema"}
         mesh = ET.parse(dae).getroot().find(".//c:geometry/c:mesh", ns)
         groups = mesh.findall("c:triangles", ns)
-        assert len(groups) == 1, "AI exige un seul groupe de triangles"
-        assert len(groups[0].findall("c:input", ns)) == 1, "AI exige une seule entrée par sommet"
-        assert 0 < st["tris_cropped"] < st["tris_in"], "le recadrage par polygone n'a rien filtré"
+        assert len(groups) == 1, "AI requires a single triangle group"
+        assert len(groups[0].findall("c:input", ns)) == 1, "AI requires a single input per vertex"
+        assert 0 < st["tris_cropped"] < st["tris_in"], "the polygon crop filtered nothing"
     assert updater.is_newer("V26.10.04", "V26.10.03") and updater.is_newer("V26.11.01", "V26.10.12")
     assert not updater.is_newer("V26.10.03", "V26.10.03") and not updater.is_newer("V26.10.02", "dev")
-    print("OK :", VERSION, "- moteur OBJ->DAE fonctionnel,", st["tris_in"], "->", st["tris_cropped"], "triangles")
+    print("OK :", VERSION, "- OBJ->DAE engine working,", st["tris_in"], "->", st["tris_cropped"], "triangles")
     return 0
 
 
 def smoketest(shot=None):
-    """Ouvre vraiment l'interface : charge un modèle, parcourt les onglets et les vues, rend l'aperçu,
-    exporte un DAE. `shot` : chemin d'une capture d'écran PNG (nécessite Pillow et un écran)."""
+    """Really opens the interface : loads a model, goes through the tabs and views, renders the preview,
+    exports a DAE. `shot` : path of a PNG screenshot (needs Pillow and a screen)."""
     import tempfile
     import time
 
@@ -978,7 +978,7 @@ def smoketest(shot=None):
         while app.mesh is None and time.time() - t0 < 30:
             app.update()
             time.sleep(0.05)
-        assert app.mesh is not None, "le chargement de l'OBJ a échoué"
+        assert app.mesh is not None, "loading the OBJ failed"
         for key in ("place", "crop", "export", "model"):
             app.select_tab(key)
             app.update()
@@ -999,44 +999,44 @@ def smoketest(shot=None):
         if shot:
             from PIL import ImageGrab
             ImageGrab.grab().save(shot)
-        # interface de mise à jour (réponse simulée : aucun accès réseau)
+        # update interface (simulated answer : no network access)
         fake = {"tag": "V99.01.01", "name": "x", "date": "2099-01-01", "notes": "", "page": "p", "download": "d", "newer": True}
         app._on_update_result(fake, False)
         app.update()
-        assert app.upd_btn.winfo_ismapped(), "le bouton de mise à jour n'apparaît pas"
+        assert app.upd_btn.winfo_ismapped(), "the update button does not appear"
         app._on_update_result({**fake, "tag": "V00.01.01", "newer": False}, False)
         app.update()
-        assert not app.upd_btn.winfo_ismapped(), "le bouton de mise à jour ne disparaît pas"
+        assert not app.upd_btn.winfo_ismapped(), "the update button does not disappear"
         app.destroy()
-    print("OK :", VERSION, "- interface fonctionnelle (chargement, onglets, vues, rendu, export)")
+    print("OK :", VERSION, "- interface working (loading, tabs, views, rendering, export)")
     return 0
 
 
 def main(argv):
     import sys
 
-    for stream in (sys.stdout, sys.stderr):  # console Windows (cp1252) : ne jamais planter sur un caractère exotique
+    for stream in (sys.stdout, sys.stderr):  # Windows console (cp1252) : never crash on an exotic character
         try:
             stream.reconfigure(errors="replace")
-        except Exception:  # noqa: BLE001  (application sans console : flux absent)
+        except Exception:  # noqa: BLE001  (app without console : stream absent)
             pass
     if "--selftest" in argv:
         return selftest()
-    if "--check-update" in argv:  # python3 app.py --check-update (sans fenêtre)
+    if "--check-update" in argv:  # python3 app.py --check-update (no window)
         try:
             info = updater.fetch_latest(VERSION)
         except Exception as e:  # noqa: BLE001
-            print("Impossible de vérifier :", e)
+            print("Could not check:", e)
             return 2
-        print(f"Version actuelle : {VERSION} | dernière version publiée : {info['tag']} | "
-              + ("mise à jour disponible : " + info["download"] if info["newer"] else "à jour"))
+        print(f"Current version: {VERSION} | latest published version: {info['tag']} | "
+              + ("update available: " + info["download"] if info["newer"] else "up to date"))
         return 0
     if "--smoketest" in argv:
         shot = argv[argv.index("--screenshot") + 1] if "--screenshot" in argv else None
         return smoketest(shot)
     app = App()
     paths = [p for p in argv if p.lower().endswith(".obj") and os.path.isfile(p)]
-    if paths:  # python3 app.py modele.obj
+    if paths:  # python3 app.py model.obj
         app.after(400, app.load, os.path.abspath(paths[0]))
     app.mainloop()
     return 0
